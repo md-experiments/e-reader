@@ -14,6 +14,7 @@ import {
 } from '@/lib/firestore';
 import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
 import PdfViewer from '@/components/PdfViewer';
+import EpubViewer from '@/components/EpubViewer';
 import TocSidebar from '@/components/TocSidebar';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
@@ -297,7 +298,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               opacity: viewMode === 'pdf' ? 1 : 0.55,
             }}
           >
-            {viewMode === 'reader' ? 'PDF' : 'Reader'}
+            {viewMode === 'reader' ? (book?.fileType === 'epub' ? 'HTML' : 'PDF') : 'Reader'}
           </button>
         </div>
       </header>
@@ -394,12 +395,21 @@ export default function Reader({ bookId }: { bookId: string }) {
       >
         {viewMode === 'pdf' && book ? (
           <div className="max-w-3xl mx-auto">
-            <PdfViewer
-              storagePath={book.storagePath}
-              currentPage={currentPage}
-              bgColor={t.bg}
-              borderColor={t.border}
-            />
+            {book.fileType === 'epub' ? (
+              <EpubViewer
+                storagePath={book.storagePath}
+                currentPage={currentPage}
+                bgColor={t.bg}
+                borderColor={t.border}
+              />
+            ) : (
+              <PdfViewer
+                storagePath={book.storagePath}
+                currentPage={currentPage}
+                bgColor={t.bg}
+                borderColor={t.border}
+              />
+            )}
           </div>
         ) : (
           <div className="max-w-[65ch] mx-auto">

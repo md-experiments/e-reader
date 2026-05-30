@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { extractPdfPages, getPdfTitle } from '@/lib/pdfExtract';
-import { createBook, updateBook, uploadPdf, uploadExtractedText, getBooks } from '@/lib/firestore';
+import { extractEpubPages, extractEpubTitle, getEpubTitle } from '@/lib/epubExtract';
+import { createBook, updateBook, uploadPdf, uploadEpub, uploadExtractedText, getBooks } from '@/lib/firestore';
 import TagInput from '@/components/TagInput';
 
 const COVER_COLORS = [
@@ -18,6 +19,7 @@ export default function UploadFlow() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  const [fileType, setFileType] = useState<'pdf' | 'epub'>('pdf');
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [existingTags, setExistingTags] = useState<string[]>([]);
@@ -40,7 +42,8 @@ export default function UploadFlow() {
     e.preventDefault();
     setDragOver(false);
     const dropped = e.dataTransfer.files[0];
-    if (dropped?.type === 'application/pdf') selectFile(dropped);
+    const isEpub = dropped?.name.toLowerCase().endsWith('.epub');
+    if (dropped?.type === 'application/pdf' || isEpub) selectFile(dropped);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,9 +52,15 @@ export default function UploadFlow() {
   };
 
   const selectFile = (f: File) => {
+    const isEpub = f.name.toLowerCase().endsWith('.epub');
     setFile(f);
-    setTitle(getPdfTitle(f));
+    setFileType(isEpub ? 'epub' : 'pdf');
+    setTitle(isEpub ? getEpubTitle(f) : getPdfTitle(f));
     setTags([]);
+    // Try to pull a better title from the OPF metadata asynchronously
+    if (isEpub) {
+      extractEpubTitle(f).then((t) => { if (t) setTitle(t); });
+    }
   };
 
   const handleUpload = async () => {
@@ -62,13 +71,13 @@ export default function UploadFlow() {
       const coverColor = COVER_COLORS[Math.floor(Math.random() * COVER_COLORS.length)];
 
       setStage('extracting');
-      const extracted = await extractPdfPages(file, (page, total) =>
-        setExtractProgress({ page, total }),
-      );
+      const extracted = fileType === 'epub'
+        ? await extractEpubPages(file, (page, total) => setExtractProgress({ page, total }))
+        : await extractPdfPages(file, (page, total) => setExtractProgress({ page, total }));
 
       setStage('uploading');
       const book = await createBook(user.uid, {
-        title: title.trim() || getPdfTitle(file),
+        title: title.trim() || (fileType === 'epub' ? getEpubTitle(file) : getPdfTitle(file)),
         filename: file.name,
         pageCount: extracted.pageCount,
         storagePath: '',
@@ -76,10 +85,13 @@ export default function UploadFlow() {
         coverColor,
         tags,
         toc: extracted.toc,
+        fileType,
       });
 
       const [storagePath, textStoragePath] = await Promise.all([
-        uploadPdf(user.uid, book.id, file),
+        fileType === 'epub'
+          ? uploadEpub(user.uid, book.id, file)
+          : uploadPdf(user.uid, book.id, file),
         uploadExtractedText(user.uid, book.id, JSON.stringify(extracted)),
       ]);
 
@@ -110,16 +122,16 @@ export default function UploadFlow() {
           'border-gray-200 hover:border-gray-300 bg-gray-50 cursor-pointer'
         }`}
       >
-        <div className="text-3xl mb-3">{file ? '📄' : '📂'}</div>
+        <div className="text-3xl mb-3">{file ? (fileType === 'epub' ? '📖' : '📄') : '📂'}</div>
         {file ? (
           <p className="text-sm font-medium text-gray-600">{file.name}</p>
         ) : (
           <>
-            <p className="text-sm font-medium text-gray-700">Drop a PDF here</p>
+            <p className="text-sm font-medium text-gray-700">Drop a PDF or EPUB here</p>
             <p className="text-xs text-gray-400 mt-1">or click to browse</p>
           </>
         )}
-        <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
+        <input ref={inputRef} type="file" accept="application/pdf,application/epub+zip,.epub" className="hidden" onChange={handleFileChange} />
       </div>
 
       {/* Title + tags (shown after file is selected, before processing) */}
@@ -157,7 +169,7 @@ export default function UploadFlow() {
             <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin shrink-0" />
             <span className="text-sm text-gray-600">
               {stage === 'extracting'
-                ? `Extracting text… page ${extractProgress.page} of ${extractProgress.total}`
+                ? `Extracting text… ${fileType === 'epub' ? 'chapter' : 'page'} ${extractProgress.page} of ${extractProgress.total}`
                 : stage === 'uploading' ? 'Uploading to library…' : 'Saving…'}
             </span>
           </div>
