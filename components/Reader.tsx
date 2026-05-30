@@ -239,8 +239,8 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
-      style={{ backgroundColor: t.bg, color: t.fg }}
+      className="flex flex-col overflow-hidden"
+      style={{ height: '100dvh', backgroundColor: t.bg, color: t.fg }}
       onClick={dismiss}
     >
       {/* Top toolbar */}
