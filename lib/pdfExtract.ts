@@ -33,7 +33,7 @@ function buildPageStructure(items: unknown[]): { segments: PageSegment[]; text: 
 
   const flush = () => {
     if (currentParts.length === 0) return;
-    const text = currentParts.join('').replace(/\s+/g, ' ').trim();
+    const text = currentParts.join(' ').replace(/\s+/g, ' ').trim();
     if (text) lines.push({ y: currentY, fontSize: currentFontSize, text });
     currentParts = [];
   };
@@ -85,7 +85,7 @@ function buildPageStructure(items: unknown[]): { segments: PageSegment[]; text: 
 
   // Classify each paragraph as heading or body text
   const segments: PageSegment[] = paragraphs.map((para) => {
-    const text = para.lines.map((l) => l.text).join(' ').replace(/\s+/g, ' ').trim();
+    const text = para.lines.map((l) => l.text).join(' ').trim();
     const ratio = medianFontSize > 0 ? para.maxFontSize / medianFontSize : 1;
     let type: PageSegment['type'] = 'p';
     if (ratio >= 1.6) type = 'h1';
