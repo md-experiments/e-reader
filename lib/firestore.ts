@@ -10,7 +10,7 @@ import {
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, uploadString } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadString, getBytes } from 'firebase/storage';
 import { getFirebaseDb, getFirebaseStorage } from '@/lib/firebase';
 import type { Book, ReadingProgress, Highlight, HighlightColor } from '@/types';
 
@@ -153,4 +153,10 @@ export async function uploadExtractedText(
 
 export async function getStorageDownloadUrl(path: string): Promise<string> {
   return getDownloadURL(ref(getFirebaseStorage(), path));
+}
+
+// Uses Firebase SDK getBytes() to avoid CORS issues with direct fetch() calls.
+export async function getStorageJson<T>(path: string): Promise<T> {
+  const bytes = await getBytes(ref(getFirebaseStorage(), path));
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }

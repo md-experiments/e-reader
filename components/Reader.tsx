@@ -9,7 +9,7 @@ import {
   saveProgress,
   getHighlightsForPage,
   addHighlight,
-  getStorageDownloadUrl,
+  getStorageJson,
 } from '@/lib/firestore';
 import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook } from '@/types';
@@ -74,8 +74,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       setBook(bookData);
       if (progress) setCurrentPage(progress.currentPage);
 
-      const url = await getStorageDownloadUrl(bookData.textStoragePath);
-      const json: ExtractedBook = await fetch(url).then((r) => r.json());
+      const json = await getStorageJson<ExtractedBook>(bookData.textStoragePath);
       setPages(json.pages);
       setLoading(false);
     })();
