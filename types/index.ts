@@ -7,6 +7,7 @@ export interface Book {
   storagePath: string;
   textStoragePath: string;
   coverColor: string;
+  tags: string[];
 }
 
 export interface ReadingProgress {

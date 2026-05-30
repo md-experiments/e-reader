@@ -22,7 +22,7 @@ export async function createBook(
 ): Promise<Book> {
   const db = getFirebaseDb();
   const bookRef = doc(collection(db, 'users', uid, 'books'));
-  const book: Book = { ...data, id: bookRef.id, uploadedAt: new Date() };
+  const book: Book = { ...data, tags: data.tags ?? [], id: bookRef.id, uploadedAt: new Date() };
   await setDoc(bookRef, { ...book, uploadedAt: serverTimestamp() });
   return book;
 }
