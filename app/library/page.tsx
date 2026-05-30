@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import TagInput from '@/components/TagInput';
 import { useAuth } from '@/hooks/useAuth';
-import { getBooks, getProgressForBooks, updateBook } from '@/lib/firestore';
+import { getBooks, getProgressForBooks, updateBook, deleteBook } from '@/lib/firestore';
 import type { Book, ReadingProgress } from '@/types';
 
 export default function LibraryPage() {
@@ -46,6 +46,15 @@ export default function LibraryPage() {
         prev.map((b) => (b.id === bookId ? { ...b, title: newTitle, tags: newTags } : b)),
       );
       setEditingBook(null);
+    },
+    [user],
+  );
+
+  const handleDelete = useCallback(
+    async (bookId: string) => {
+      if (!user) return;
+      await deleteBook(user.uid, bookId);
+      setBooks((prev) => prev.filter((b) => b.id !== bookId));
     },
     [user],
   );
@@ -131,6 +140,7 @@ export default function LibraryPage() {
                   book={book}
                   progress={progress[book.id]}
                   onEdit={() => setEditingBook(book)}
+                  onDelete={() => handleDelete(book.id)}
                   onTagClick={(tag) => setActiveTag(tag)}
                 />
               ))}
@@ -157,32 +167,101 @@ function BookCard({
   book,
   progress,
   onEdit,
+  onDelete,
   onTagClick,
 }: {
   book: Book;
   progress?: ReadingProgress;
   onEdit: () => void;
+  onDelete: () => void;
   onTagClick: (tag: string) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   const pct = progress?.percentComplete ?? 0;
   const lastRead = progress?.lastReadAt
     ? new Date(progress.lastReadAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     : null;
 
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setConfirming(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    await onDelete();
+    // component unmounts after this, no need to reset state
+  };
+
   return (
-    <div className="group relative">
-      {/* Edit button */}
-      <button
-        onClick={(e) => { e.preventDefault(); onEdit(); }}
-        title="Edit title & tags"
-        className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-black/30 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60"
-      >
-        ✎
-      </button>
+    <div className="relative">
+      {/* ⋮ menu button — always visible */}
+      <div ref={menuRef} className="absolute top-1.5 right-1.5 z-10">
+        <button
+          onClick={(e) => { e.preventDefault(); setMenuOpen((o) => !o); setConfirming(false); }}
+          className="w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center hover:bg-black/60 transition-colors text-base leading-none"
+          aria-label="Book options"
+        >
+          ⋮
+        </button>
+
+        {menuOpen && (
+          <div className="absolute top-8 right-0 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden min-w-[130px]">
+            {confirming ? (
+              <div className="p-3">
+                <p className="text-xs text-gray-700 mb-2 font-medium">Delete this book?</p>
+                <p className="text-xs text-gray-400 mb-3">This cannot be undone.</p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={(e) => { e.preventDefault(); setConfirming(false); }}
+                    className="flex-1 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={(e) => { e.preventDefault(); handleDelete(); }}
+                    disabled={deleting}
+                    className="flex-1 py-1.5 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
+                  >
+                    {deleting ? '…' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => { e.preventDefault(); setMenuOpen(false); onEdit(); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={(e) => { e.preventDefault(); setConfirming(true); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors border-t border-gray-100"
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       <Link href={`/reader/${book.id}`} className="block">
         <div
-          className="aspect-[2/3] rounded-xl flex items-end p-3 shadow-sm group-hover:shadow-md transition-shadow"
+          className="aspect-[2/3] rounded-xl flex items-end p-3 shadow-sm hover:shadow-md transition-shadow"
           style={{ backgroundColor: book.coverColor }}
         >
           <span className="text-white text-xs font-semibold line-clamp-3 leading-tight drop-shadow-sm">
@@ -197,7 +276,6 @@ function BookCard({
             </div>
           )}
           {lastRead && <p className="text-xs text-gray-400 mt-0.5">{pct}% · {lastRead}</p>}
-          {/* Tag badges */}
           {book.tags?.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
               {book.tags.map((tag) => (

@@ -5,12 +5,14 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
+  writeBatch,
   query,
   where,
   serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, uploadString, getBytes } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadString, getBytes, deleteObject } from 'firebase/storage';
 import { getFirebaseDb, getFirebaseStorage } from '@/lib/firebase';
 import type { Book, ReadingProgress, Highlight, HighlightColor } from '@/types';
 
@@ -159,4 +161,27 @@ export async function getStorageDownloadUrl(path: string): Promise<string> {
 export async function getStorageJson<T>(path: string): Promise<T> {
   const bytes = await getBytes(ref(getFirebaseStorage(), path));
   return JSON.parse(new TextDecoder().decode(bytes)) as T;
+}
+
+export async function deleteBook(uid: string, bookId: string): Promise<void> {
+  const db = getFirebaseDb();
+  const storage = getFirebaseStorage();
+  const batch = writeBatch(db);
+
+  batch.delete(doc(db, 'users', uid, 'books', bookId));
+  batch.delete(doc(db, 'users', uid, 'progress', bookId));
+
+  // Delete all highlights for this book
+  const hlSnap = await getDocs(
+    query(collection(db, 'users', uid, 'highlights'), where('bookId', '==', bookId)),
+  );
+  hlSnap.docs.forEach((d) => batch.delete(d.ref));
+
+  await batch.commit();
+
+  // Best-effort storage cleanup (non-blocking)
+  await Promise.allSettled([
+    deleteObject(ref(storage, `pdfs/${uid}/${bookId}/original.pdf`)),
+    deleteObject(ref(storage, `texts/${uid}/${bookId}/pages.json`)),
+  ]);
 }
