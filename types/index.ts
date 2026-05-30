@@ -15,6 +15,7 @@ export interface Book {
   coverColor: string;
   tags: string[];
   toc?: TocEntry[];
+  fileType?: 'pdf' | 'epub';
 }
 
 export interface ReadingProgress {

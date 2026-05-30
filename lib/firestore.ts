@@ -142,6 +142,13 @@ export async function uploadPdf(uid: string, bookId: string, file: File): Promis
   return path;
 }
 
+export async function uploadEpub(uid: string, bookId: string, file: File): Promise<string> {
+  const storage = getFirebaseStorage();
+  const path = `epubs/${uid}/${bookId}/original.epub`;
+  await uploadBytes(ref(storage, path), file);
+  return path;
+}
+
 export async function uploadExtractedText(
   uid: string,
   bookId: string,
@@ -182,6 +189,7 @@ export async function deleteBook(uid: string, bookId: string): Promise<void> {
   // Best-effort storage cleanup (non-blocking)
   await Promise.allSettled([
     deleteObject(ref(storage, `pdfs/${uid}/${bookId}/original.pdf`)),
+    deleteObject(ref(storage, `epubs/${uid}/${bookId}/original.epub`)),
     deleteObject(ref(storage, `texts/${uid}/${bookId}/pages.json`)),
   ]);
 }
