@@ -106,12 +106,18 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [fontFamily, setFontFamily] = useState<FontFamily>(() => loadSetting('fontFamily', 'georgia'));
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Persist settings whenever they change
   useEffect(() => { saveSettings({ fontSize }); }, [fontSize]);
   useEffect(() => { saveSettings({ theme }); }, [theme]);
   useEffect(() => { saveSettings({ fontFamily }); }, [fontFamily]);
+
+  // Scroll to top whenever the page changes
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [currentPage]);
 
   // Load book + progress
   useEffect(() => {
@@ -370,7 +376,22 @@ export default function Reader({ bookId }: { bookId: string }) {
       )}
 
       {/* Page content */}
-      <main className="flex-1 overflow-y-auto px-5 py-10">
+      <main
+        ref={mainRef}
+        className="flex-1 overflow-y-auto px-5 py-10"
+        onTouchStart={(e) => {
+          touchStartX.current = e.touches[0].clientX;
+          touchStartY.current = e.touches[0].clientY;
+        }}
+        onTouchEnd={(e) => {
+          const dx = e.changedTouches[0].clientX - touchStartX.current;
+          const dy = e.changedTouches[0].clientY - touchStartY.current;
+          // Only fire if clearly horizontal (dx > dy) and long enough to be intentional
+          if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+          if (dx > 0) goToPrev();
+          else goToNext();
+        }}
+      >
         {viewMode === 'pdf' && book ? (
           <div className="max-w-3xl mx-auto">
             <PdfViewer
