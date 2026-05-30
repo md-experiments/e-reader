@@ -12,6 +12,7 @@ import {
   getStorageJson,
 } from '@/lib/firestore';
 import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
+import PdfViewer from '@/components/PdfViewer';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook } from '@/types';
 
 // ── Themes ────────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [colorPicker, setColorPicker] = useState<ColorPickerState | null>(null);
+  const [viewMode, setViewMode] = useState<'reader' | 'pdf'>('reader');
 
   // Settings — initialised from localStorage immediately to avoid flash
   const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
@@ -238,13 +240,32 @@ export default function Reader({ bookId }: { bookId: string }) {
         <span className="text-sm font-medium truncate max-w-[180px] sm:max-w-xs opacity-80">
           {book?.title}
         </span>
-        <button
-          onClick={(e) => { e.stopPropagation(); setShowSettings((s) => !s); }}
-          className="text-sm px-2 py-1 rounded opacity-50 hover:opacity-100 transition-opacity"
-          style={{ '--hover-bg': t.hover } as React.CSSProperties}
-        >
-          Aa
-        </button>
+        <div className="flex items-center gap-2">
+          {viewMode === 'reader' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowSettings((s) => !s); }}
+              className="text-sm px-2 py-1 rounded opacity-50 hover:opacity-100 transition-opacity"
+            >
+              Aa
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewMode((v) => v === 'reader' ? 'pdf' : 'reader');
+              setShowSettings(false);
+            }}
+            className="text-xs px-2.5 py-1 rounded border transition-colors"
+            style={{
+              borderColor: t.border,
+              color: t.fg,
+              backgroundColor: viewMode === 'pdf' ? t.hover : 'transparent',
+              opacity: viewMode === 'pdf' ? 1 : 0.55,
+            }}
+          >
+            {viewMode === 'reader' ? 'PDF' : 'Reader'}
+          </button>
+        </div>
       </header>
 
       {/* Settings panel */}
@@ -322,19 +343,30 @@ export default function Reader({ bookId }: { bookId: string }) {
 
       {/* Page content */}
       <main className="flex-1 overflow-y-auto px-5 py-10">
-        <div className="max-w-[65ch] mx-auto">
-          <div
-            ref={contentRef}
-            onMouseUp={handleMouseUp}
-            className="select-text"
-            style={{
-              fontSize: `${fontSize}px`,
-              lineHeight: 1.9,
-              fontFamily: FONTS[fontFamily].style,
-            }}
-            dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
-          />
-        </div>
+        {viewMode === 'pdf' && book ? (
+          <div className="max-w-3xl mx-auto">
+            <PdfViewer
+              storagePath={book.storagePath}
+              currentPage={currentPage}
+              bgColor={t.bg}
+              borderColor={t.border}
+            />
+          </div>
+        ) : (
+          <div className="max-w-[65ch] mx-auto">
+            <div
+              ref={contentRef}
+              onMouseUp={handleMouseUp}
+              className="select-text"
+              style={{
+                fontSize: `${fontSize}px`,
+                lineHeight: 1.9,
+                fontFamily: FONTS[fontFamily].style,
+              }}
+              dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
+            />
+          </div>
+        )}
       </main>
 
       {/* Color picker */}
