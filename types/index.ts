@@ -30,9 +30,15 @@ export interface Highlight {
   createdAt: Date;
 }
 
+export interface PageSegment {
+  type: 'h1' | 'h2' | 'h3' | 'p';
+  text: string;
+}
+
 export interface PageData {
   pageNumber: number;
   text: string;
+  segments?: PageSegment[];
 }
 
 export interface ExtractedBook {

@@ -212,7 +212,9 @@ export default function Reader({ bookId }: { bookId: string }) {
     );
   }
 
-  const pageText = pages[currentPage - 1]?.text ?? '';
+  const currentPageData = pages[currentPage - 1];
+  const pageText = currentPageData?.text ?? '';
+  const pageSegments = currentPageData?.segments;
   const pct = Math.round((currentPage / (book?.pageCount ?? 1)) * 100);
 
   return (
@@ -330,7 +332,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               lineHeight: 1.9,
               fontFamily: FONTS[fontFamily].style,
             }}
-            dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights) }}
+            dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
           />
         </div>
       </main>
