@@ -1,7 +1,11 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import type { Auth } from 'firebase/auth';
-import type { Firestore } from 'firebase/firestore';
-import type { FirebaseStorage } from 'firebase/storage';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
+
+// Static imports are fine — importing these functions doesn't initialize Firebase.
+// Initialization only happens when getApp() is called, which is inside lazy getters
+// that are only ever called from client-side effects/handlers, never during SSR.
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -22,27 +26,17 @@ function getApp(): FirebaseApp {
   return _app;
 }
 
-// Lazy getters — only called from client-side effects/handlers, never during SSR module eval.
 export function getFirebaseAuth(): Auth {
-  if (!_auth) {
-    const { getAuth } = require('firebase/auth');
-    _auth = getAuth(getApp());
-  }
-  return _auth!;
+  if (!_auth) _auth = getAuth(getApp());
+  return _auth;
 }
 
 export function getFirebaseDb(): Firestore {
-  if (!_db) {
-    const { getFirestore } = require('firebase/firestore');
-    _db = getFirestore(getApp());
-  }
-  return _db!;
+  if (!_db) _db = getFirestore(getApp());
+  return _db;
 }
 
 export function getFirebaseStorage(): FirebaseStorage {
-  if (!_storage) {
-    const { getStorage } = require('firebase/storage');
-    _storage = getStorage(getApp());
-  }
-  return _storage!;
+  if (!_storage) _storage = getStorage(getApp());
+  return _storage;
 }
