@@ -16,6 +16,7 @@ export interface Book {
   tags: string[];
   toc?: TocEntry[];
   fileType?: 'pdf' | 'epub';
+  thumbnailUrl?: string;
 }
 
 export interface ReadingProgress {

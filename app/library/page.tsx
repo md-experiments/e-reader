@@ -260,13 +260,24 @@ function BookCard({
       </div>
 
       <Link href={`/reader/${book.id}`} className="block">
-        <div
-          className="aspect-[2/3] rounded-xl flex items-end p-3 shadow-sm hover:shadow-md transition-shadow"
-          style={{ backgroundColor: book.coverColor }}
-        >
-          <span className="text-white text-xs font-semibold line-clamp-3 leading-tight drop-shadow-sm">
-            {book.title}
-          </span>
+        <div className="aspect-[2/3] rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow relative">
+          {book.thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={book.thumbnailUrl}
+              alt={book.title}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-full h-full flex items-end p-3"
+              style={{ backgroundColor: book.coverColor }}
+            >
+              <span className="text-white text-xs font-semibold line-clamp-3 leading-tight drop-shadow-sm">
+                {book.title}
+              </span>
+            </div>
+          )}
         </div>
         <div className="mt-2 px-0.5">
           <p className="text-xs text-gray-700 font-medium truncate leading-tight">{book.title}</p>

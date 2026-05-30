@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { extractPdfPages, getPdfTitle } from '@/lib/pdfExtract';
 import { extractEpubPages, extractEpubTitle, getEpubTitle } from '@/lib/epubExtract';
-import { createBook, updateBook, uploadPdf, uploadEpub, uploadExtractedText, getBooks } from '@/lib/firestore';
+import { createBook, updateBook, uploadPdf, uploadEpub, uploadExtractedText, uploadThumbnail, getBooks } from '@/lib/firestore';
+import { generatePdfThumbnail, extractEpubCoverBlob } from '@/lib/thumbnail';
 import TagInput from '@/components/TagInput';
 
 const COVER_COLORS = [
@@ -75,6 +76,11 @@ export default function UploadFlow() {
         ? await extractEpubPages(file, (page, total) => setExtractProgress({ page, total }))
         : await extractPdfPages(file, (page, total) => setExtractProgress({ page, total }));
 
+      // Start thumbnail generation in parallel with book creation (best-effort)
+      const thumbnailPromise = fileType === 'epub'
+        ? extractEpubCoverBlob(file)
+        : generatePdfThumbnail(file);
+
       setStage('uploading');
       const book = await createBook(user.uid, {
         title: title.trim() || (fileType === 'epub' ? getEpubTitle(file) : getPdfTitle(file)),
@@ -88,15 +94,19 @@ export default function UploadFlow() {
         fileType,
       });
 
-      const [storagePath, textStoragePath] = await Promise.all([
+      const [storagePath, textStoragePath, thumbnailBlob] = await Promise.all([
         fileType === 'epub'
           ? uploadEpub(user.uid, book.id, file)
           : uploadPdf(user.uid, book.id, file),
         uploadExtractedText(user.uid, book.id, JSON.stringify(extracted)),
+        thumbnailPromise,
       ]);
 
       setStage('saving');
-      await updateBook(user.uid, book.id, { storagePath, textStoragePath });
+      const thumbnailUrl = thumbnailBlob
+        ? await uploadThumbnail(user.uid, book.id, thumbnailBlob).catch(() => undefined)
+        : undefined;
+      await updateBook(user.uid, book.id, { storagePath, textStoragePath, ...(thumbnailUrl ? { thumbnailUrl } : {}) });
 
       setStage('done');
       router.push(`/reader/${book.id}`);
