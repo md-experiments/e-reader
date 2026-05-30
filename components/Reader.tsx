@@ -7,13 +7,15 @@ import {
   getBook,
   getProgress,
   saveProgress,
+  updateBook,
   getHighlightsForPage,
   addHighlight,
   getStorageJson,
 } from '@/lib/firestore';
 import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
 import PdfViewer from '@/components/PdfViewer';
-import type { Book, PageData, Highlight, HighlightColor, ExtractedBook } from '@/types';
+import TocSidebar from '@/components/TocSidebar';
+import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
 // ── Themes ────────────────────────────────────────────────────────────────────
 
@@ -96,6 +98,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [showSettings, setShowSettings] = useState(false);
   const [colorPicker, setColorPicker] = useState<ColorPickerState | null>(null);
   const [viewMode, setViewMode] = useState<'reader' | 'pdf'>('reader');
+  const [showToc, setShowToc] = useState(false);
 
   // Settings — initialised from localStorage immediately to avoid flash
   const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
@@ -189,6 +192,15 @@ export default function Reader({ bookId }: { bookId: string }) {
     setShowSettings(false);
   }, []);
 
+  const saveToc = useCallback(
+    async (newToc: TocEntry[]) => {
+      if (!user || !book) return;
+      await updateBook(user.uid, bookId, { toc: newToc });
+      setBook((prev) => (prev ? { ...prev, toc: newToc } : prev));
+    },
+    [user, bookId, book],
+  );
+
   const goToPrev = useCallback(() => setCurrentPage((p) => Math.max(1, p - 1)), []);
   const goToNext = useCallback(
     () => setCurrentPage((p) => Math.min(book?.pageCount ?? p, p + 1)),
@@ -249,6 +261,22 @@ export default function Reader({ bookId }: { bookId: string }) {
               Aa
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowToc((s) => !s);
+              setShowSettings(false);
+            }}
+            className="text-xs px-2.5 py-1 rounded border transition-colors"
+            style={{
+              borderColor: t.border,
+              color: t.fg,
+              backgroundColor: showToc ? t.hover : 'transparent',
+              opacity: showToc ? 1 : 0.55,
+            }}
+          >
+            TOC
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -433,6 +461,19 @@ export default function Reader({ bookId }: { bookId: string }) {
           </div>
         </div>
       </footer>
+
+      {/* TOC Sidebar */}
+      {showToc && (
+        <TocSidebar
+          toc={book?.toc ?? []}
+          currentPage={currentPage}
+          pageCount={book?.pageCount ?? 1}
+          onNavigate={(page) => setCurrentPage(page)}
+          onClose={() => setShowToc(false)}
+          onSave={saveToc}
+          t={t}
+        />
+      )}
     </div>
   );
 }

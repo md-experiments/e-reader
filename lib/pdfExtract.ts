@@ -1,4 +1,4 @@
-import type { ExtractedBook, PageData, PageSegment } from '@/types';
+import type { ExtractedBook, PageData, PageSegment, TocEntry } from '@/types';
 
 interface RawLine {
   y: number;
@@ -98,6 +98,48 @@ function buildPageStructure(items: unknown[]): { segments: PageSegment[]; text: 
   return { segments, text };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function extractTocFromPdf(pdf: any): Promise<TocEntry[]> {
+  try {
+    const outline = await pdf.getOutline();
+    if (!outline || outline.length === 0) return [];
+
+    const entries: TocEntry[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async function flatten(items: any[], level: number): Promise<void> {
+      for (const item of items) {
+        let page = 1;
+        try {
+          if (item.dest) {
+            const dest =
+              typeof item.dest === 'string'
+                ? await pdf.getDestination(item.dest)
+                : item.dest;
+            if (dest?.[0] != null) {
+              const idx = await pdf.getPageIndex(dest[0]);
+              page = idx + 1;
+            }
+          }
+        } catch {
+          // Unresolvable destination — default to page 1
+        }
+        if (item.title?.trim()) {
+          entries.push({ title: item.title.trim(), page, level });
+        }
+        if (item.items?.length) {
+          await flatten(item.items, level + 1);
+        }
+      }
+    }
+
+    await flatten(outline, 0);
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
 export async function extractPdfPages(
   file: File,
   onProgress?: (page: number, total: number) => void,
@@ -118,7 +160,8 @@ export async function extractPdfPages(
     onProgress?.(i, pageCount);
   }
 
-  return { pageCount, pages };
+  const toc = await extractTocFromPdf(pdf);
+  return { pageCount, pages, toc };
 }
 
 export function getPdfTitle(file: File): string {

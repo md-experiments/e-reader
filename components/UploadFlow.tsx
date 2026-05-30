@@ -75,6 +75,7 @@ export default function UploadFlow() {
         textStoragePath: '',
         coverColor,
         tags,
+        toc: extracted.toc,
       });
 
       const [storagePath, textStoragePath] = await Promise.all([
