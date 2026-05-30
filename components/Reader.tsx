@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
+import { useIsAdmin } from '@/hooks/useIsAdmin';
 import {
   getBook,
   getProgress,
@@ -11,6 +12,8 @@ import {
   getHighlightsForPage,
   addHighlight,
   getStorageJson,
+  getTranslation,
+  saveTranslation,
 } from '@/lib/firestore';
 import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
 import PdfViewer from '@/components/PdfViewer';
@@ -91,6 +94,7 @@ interface ColorPickerState {
 
 export default function Reader({ bookId }: { bookId: string }) {
   const { user } = useAuth();
+  const isAdmin = useIsAdmin();
   const [book, setBook] = useState<Book | null>(null);
   const [pages, setPages] = useState<PageData[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -98,8 +102,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [colorPicker, setColorPicker] = useState<ColorPickerState | null>(null);
-  const [viewMode, setViewMode] = useState<'reader' | 'pdf'>('reader');
+  const [viewMode, setViewMode] = useState<'reader' | 'pdf' | 'translation'>('reader');
   const [showToc, setShowToc] = useState(false);
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [translationLoading, setTranslationLoading] = useState(false);
 
   // Settings — initialised from localStorage immediately to avoid flash
   const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
@@ -142,6 +148,14 @@ export default function Reader({ bookId }: { bookId: string }) {
     if (!user) return;
     getHighlightsForPage(user.uid, bookId, currentPage).then(setHighlights);
   }, [user, bookId, currentPage]);
+
+  // Reset translation state when navigating pages
+  useEffect(() => {
+    setTranslatedText(null);
+    setTranslationLoading(false);
+    if (viewMode === 'translation') setViewMode('reader');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage]);
 
   // Debounced progress save
   useEffect(() => {
@@ -208,6 +222,42 @@ export default function Reader({ bookId }: { bookId: string }) {
     [user, bookId, book],
   );
 
+  const handleTranslate = useCallback(async () => {
+    if (!user || !isAdmin) return;
+    if (viewMode === 'translation') {
+      setViewMode('reader');
+      return;
+    }
+    setViewMode('translation');
+    if (translatedText !== null) return; // already cached in state
+
+    setTranslationLoading(true);
+    try {
+      const cached = await getTranslation(user.uid, bookId, currentPage);
+      if (cached) {
+        setTranslatedText(cached);
+        setTranslationLoading(false);
+        return;
+      }
+
+      const pageText = pages[currentPage - 1]?.text ?? '';
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ uid: user.uid, text: pageText }),
+      });
+      if (!res.ok) throw new Error('Translation request failed');
+      const { translatedText: text } = await res.json() as { translatedText: string };
+      setTranslatedText(text);
+      await saveTranslation(user.uid, bookId, currentPage, text);
+    } catch {
+      setTranslatedText('Translation failed. Please try again.');
+    } finally {
+      setTranslationLoading(false);
+    }
+  }, [user, isAdmin, viewMode, translatedText, bookId, currentPage, pages]);
+
   const goToPrev = useCallback(() => setCurrentPage((p) => Math.max(1, p - 1)), []);
   const goToNext = useCallback(
     () => setCurrentPage((p) => Math.min(book?.pageCount ?? p, p + 1)),
@@ -268,6 +318,20 @@ export default function Reader({ bookId }: { bookId: string }) {
               Aa
             </button>
           )}
+          {isAdmin && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleTranslate(); setShowSettings(false); }}
+              className="text-xs px-2.5 py-1 rounded border transition-colors"
+              style={{
+                borderColor: t.border,
+                color: viewMode === 'translation' ? '#ffffff' : t.fg,
+                backgroundColor: viewMode === 'translation' ? '#2563eb' : 'transparent',
+                opacity: viewMode === 'translation' ? 1 : 0.55,
+              }}
+            >
+              BG
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -287,7 +351,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setViewMode((v) => v === 'reader' ? 'pdf' : 'reader');
+              setViewMode((v) => v === 'pdf' ? 'reader' : 'pdf');
               setShowSettings(false);
             }}
             className="text-xs px-2.5 py-1 rounded border transition-colors"
@@ -298,7 +362,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               opacity: viewMode === 'pdf' ? 1 : 0.55,
             }}
           >
-            {viewMode === 'reader' ? (book?.fileType === 'epub' ? 'HTML' : 'PDF') : 'Reader'}
+            {viewMode === 'pdf' ? 'Reader' : (book?.fileType === 'epub' ? 'HTML' : 'PDF')}
           </button>
         </div>
       </header>
@@ -409,6 +473,29 @@ export default function Reader({ bookId }: { bookId: string }) {
                 bgColor={t.bg}
                 borderColor={t.border}
               />
+            )}
+          </div>
+        ) : viewMode === 'translation' ? (
+          <div className="max-w-[65ch] mx-auto">
+            {translationLoading ? (
+              <div className="flex flex-col items-center gap-4 py-16" style={{ opacity: 0.5 }}>
+                <div
+                  className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: t.fg }}
+                />
+                <span className="text-sm">Translating to Bulgarian…</span>
+              </div>
+            ) : (
+              <div
+                className="select-text whitespace-pre-wrap"
+                style={{
+                  fontSize: `${fontSize}px`,
+                  lineHeight: 1.9,
+                  fontFamily: FONTS[fontFamily].style,
+                }}
+              >
+                {translatedText}
+              </div>
             )}
           </div>
         ) : (

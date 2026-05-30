@@ -178,6 +178,32 @@ export async function getStorageJson<T>(path: string): Promise<T> {
   return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }
 
+export async function getTranslation(
+  uid: string,
+  bookId: string,
+  pageNumber: number,
+): Promise<string | null> {
+  const db = getFirebaseDb();
+  const snap = await getDoc(doc(db, 'users', uid, 'translations', `${bookId}-${pageNumber}`));
+  if (!snap.exists()) return null;
+  return snap.data().translatedText as string;
+}
+
+export async function saveTranslation(
+  uid: string,
+  bookId: string,
+  pageNumber: number,
+  translatedText: string,
+): Promise<void> {
+  const db = getFirebaseDb();
+  await setDoc(doc(db, 'users', uid, 'translations', `${bookId}-${pageNumber}`), {
+    bookId,
+    pageNumber,
+    translatedText,
+    translatedAt: serverTimestamp(),
+  });
+}
+
 export async function deleteBook(uid: string, bookId: string): Promise<void> {
   const db = getFirebaseDb();
   const storage = getFirebaseStorage();
