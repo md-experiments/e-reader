@@ -20,7 +20,7 @@ function buildPrompt(text: string, prevPageText?: string): string {
 async function translateWithGemini(prompt: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   const stream = await ai.models.generateContentStream({
-    model: 'gemini-3.1-flash-lite-preview',
+    model: 'gemini-3.1-flash-lite',
     config: { thinkingConfig: { thinkingBudget: 0 } },
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
   });
