@@ -6,14 +6,14 @@ export async function POST(req: NextRequest) {
   const idToken = req.headers.get('Authorization')?.replace('Bearer ', '');
   if (!idToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let body: { uid?: string; text?: string };
+  let body: { uid?: string; text?: string; prevPageText?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { uid, text } = body;
+  const { uid, text, prevPageText } = body;
   if (!uid || !text?.trim()) {
     return NextResponse.json({ error: 'Missing uid or text' }, { status: 400 });
   }
@@ -48,8 +48,11 @@ export async function POST(req: NextRequest) {
           content:
             'You are a professional literary translator. Translate the following text to Bulgarian. ' +
             'Preserve all paragraph breaks, heading levels, and punctuation. ' +
-            'Return only the translated text — no preamble, no notes, no commentary.\n\n' +
-            text,
+            'Return only the translated text — no preamble, no notes, no commentary.' +
+            (prevPageText?.trim()
+              ? '\n\nFor context, here is the previous page (do NOT translate it, use it only to ensure continuity):\n\n' +
+                prevPageText + '\n\n---\n\nNow translate this page:\n\n' + text
+              : '\n\n' + text),
         },
       ],
     });

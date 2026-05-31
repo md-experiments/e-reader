@@ -241,11 +241,12 @@ export default function Reader({ bookId }: { bookId: string }) {
       }
 
       const pageText = pages[currentPage - 1]?.text ?? '';
+      const prevPageText = currentPage > 1 ? (pages[currentPage - 2]?.text ?? '') : '';
       const idToken = await user.getIdToken();
       const res = await fetch('/api/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ uid: user.uid, text: pageText }),
+        body: JSON.stringify({ uid: user.uid, text: pageText, prevPageText: prevPageText || undefined }),
       });
       if (!res.ok) throw new Error('Translation request failed');
       const { translatedText: text } = await res.json() as { translatedText: string };
