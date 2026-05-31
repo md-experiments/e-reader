@@ -23,7 +23,7 @@ export default function PdfViewer({ storagePath, currentPage, bgColor, borderCol
     let cancelled = false;
     (async () => {
       try {
-        const pdfjsLib = await import('pdfjs-dist');
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
         const url = await getStorageDownloadUrl(storagePath);
         const doc = await pdfjsLib.getDocument({ url }).promise;

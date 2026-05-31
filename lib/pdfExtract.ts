@@ -144,7 +144,7 @@ export async function extractPdfPages(
   file: File,
   onProgress?: (page: number, total: number) => void,
 ): Promise<ExtractedBook> {
-  const pdfjsLib = await import('pdfjs-dist');
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
   const arrayBuffer = await file.arrayBuffer();

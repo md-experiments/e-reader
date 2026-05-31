@@ -5,7 +5,7 @@ const TARGET_WIDTH = 300;
 /** Render PDF page 1 to a JPEG blob at TARGET_WIDTH pixels wide. */
 export async function generatePdfThumbnail(file: File): Promise<Blob | null> {
   try {
-    const pdfjsLib = await import('pdfjs-dist');
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
     pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
