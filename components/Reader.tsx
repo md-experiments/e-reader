@@ -118,13 +118,49 @@ export default function Reader({ bookId }: { bookId: string }) {
   const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Scroll position persistence
+  const scrollRestoredRef = useRef(false);
+  const scrollSavingEnabled = useRef(false);
+  const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentPageRef = useRef(currentPage);
+  useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
+
   // Persist settings whenever they change
   useEffect(() => { saveSettings({ fontSize }); }, [fontSize]);
   useEffect(() => { saveSettings({ theme }); }, [theme]);
   useEffect(() => { saveSettings({ fontFamily }); }, [fontFamily]);
 
-  // Scroll to top whenever the page changes
-  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [currentPage]);
+  // Remember this as the last opened book
+  useEffect(() => {
+    try { localStorage.setItem('lexis-last-book', bookId); } catch {}
+  }, [bookId]);
+
+  // Once loading completes: restore saved scroll position for the initial page
+  useEffect(() => {
+    if (loading) return;
+    if (scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
+    try {
+      const saved = localStorage.getItem(`lexis-scroll-${bookId}-${currentPage}`);
+      const top = saved ? parseInt(saved, 10) : 0;
+      requestAnimationFrame(() => {
+        mainRef.current?.scrollTo({ top });
+        setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
+      });
+    } catch {
+      setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
+    }
+  }, [loading, bookId, currentPage]);
+
+  // On page navigation: scroll to top and briefly pause saving so we don't
+  // overwrite the saved position with 0 from the programmatic scroll
+  useEffect(() => {
+    if (!scrollRestoredRef.current) return;
+    scrollSavingEnabled.current = false;
+    mainRef.current?.scrollTo({ top: 0 });
+    const t = setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
+    return () => clearTimeout(t);
+  }, [currentPage]);
 
   // Load book + progress
   useEffect(() => {
@@ -207,6 +243,15 @@ export default function Reader({ bookId }: { bookId: string }) {
     },
     [user, colorPicker, bookId, currentPage],
   );
+
+  const handleScroll = useCallback(() => {
+    if (!scrollSavingEnabled.current) return;
+    if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current);
+    scrollSaveTimer.current = setTimeout(() => {
+      const top = mainRef.current?.scrollTop ?? 0;
+      try { localStorage.setItem(`lexis-scroll-${bookId}-${currentPageRef.current}`, String(top)); } catch {}
+    }, 500);
+  }, [bookId]);
 
   const dismiss = useCallback(() => {
     setColorPicker(null);
@@ -303,7 +348,10 @@ export default function Reader({ bookId }: { bookId: string }) {
         <Link
           href="/library"
           className="text-sm transition-opacity opacity-50 hover:opacity-100"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            try { localStorage.setItem('lexis-last-book', ''); } catch {}
+          }}
         >
           ← Library
         </Link>
@@ -445,6 +493,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       <main
         ref={mainRef}
         className="flex-1 overflow-y-auto px-5 py-10"
+        onScroll={handleScroll}
         onTouchStart={(e) => {
           touchStartX.current = e.touches[0].clientX;
           touchStartY.current = e.touches[0].clientY;

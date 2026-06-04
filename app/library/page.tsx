@@ -16,6 +16,11 @@ export default function LibraryPage() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [editingBook, setEditingBook] = useState<Book | null>(null);
 
+  // Being on library means "last location is library", so clear any saved book
+  useEffect(() => {
+    try { localStorage.setItem('lexis-last-book', ''); } catch {}
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     Promise.all([getBooks(user.uid), getProgressForBooks(user.uid)]).then(

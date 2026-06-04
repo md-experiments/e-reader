@@ -4,6 +4,15 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
+function getLastRoute(): string {
+  try {
+    const bookId = localStorage.getItem('lexis-last-book');
+    return bookId ? `/reader/${bookId}` : '/library';
+  } catch {
+    return '/library';
+  }
+}
+
 export default function HomePage() {
   const { user, loading, signIn, signUp, signInWithGoogle } = useAuth();
   const router = useRouter();
@@ -14,7 +23,7 @@ export default function HomePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!loading && user) router.replace('/library');
+    if (!loading && user) router.replace(getLastRoute());
   }, [user, loading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,7 +36,7 @@ export default function HomePage() {
       } else {
         await signUp(email, password);
       }
-      router.replace('/library');
+      router.replace(getLastRoute());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -39,7 +48,7 @@ export default function HomePage() {
     setError('');
     try {
       await signInWithGoogle();
-      router.replace('/library');
+      router.replace(getLastRoute());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     }
