@@ -84,6 +84,34 @@ function saveSettings(settings: Record<string, unknown>) {
   } catch {}
 }
 
+// ── Touch-selection helpers (mobile only) ─────────────────────────────────────
+
+function caretAtPoint(x: number, y: number): Range | null {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+  // Firefox
+  const pos = (document as unknown as { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null }).caretPositionFromPoint?.(x, y);
+  if (pos) {
+    const r = document.createRange();
+    r.setStart(pos.offsetNode, pos.offset);
+    r.collapse(true);
+    return r;
+  }
+  return null;
+}
+
+function expandToWord(range: Range): Range {
+  const r = range.cloneRange();
+  const node = r.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return r;
+  const text = node.textContent ?? '';
+  let s = r.startOffset;
+  let e = s;
+  while (s > 0 && !/\s/.test(text[s - 1])) s--;
+  while (e < text.length && !/\s/.test(text[e])) e++;
+  if (s < e) { r.setStart(node, s); r.setEnd(node, e); }
+  return r;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface ColorPickerState {
@@ -123,6 +151,13 @@ export default function Reader({ bookId }: { bookId: string }) {
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchSelectStart = useRef<{ x: number; y: number } | null>(null);
+
+  // Detect touch-primary device after mount (avoids hydration mismatch)
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  useEffect(() => {
+    setIsTouchDevice(window.matchMedia('(pointer: coarse)').matches);
+  }, []);
 
   // Scroll position persistence
   const scrollRestoredRef = useRef(false);
@@ -281,6 +316,61 @@ export default function Reader({ bookId }: { bookId: string }) {
       try { localStorage.setItem(`lexis-scroll-${bookId}-${currentPageRef.current}`, String(top)); } catch {}
     }, 500);
   }, [bookId]);
+
+  const handleTouchSelectStart = useCallback((e: React.TouchEvent) => {
+    touchSelectStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, []);
+
+  const handleTouchSelectEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchSelectStart.current || !contentRef.current) return;
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const dx = endX - touchSelectStart.current.x;
+    const dy = endY - touchSelectStart.current.y;
+    const startX = touchSelectStart.current.x;
+    const startY = touchSelectStart.current.y;
+    touchSelectStart.current = null;
+
+    // Large vertical movement = scroll, let it pass through
+    if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) return;
+    // Large horizontal movement = page-swipe navigation, let it pass through
+    if (Math.abs(dx) >= 60 && Math.abs(dx) >= Math.abs(dy) * 1.5) return;
+
+    // This is a selection gesture — stop propagation so swipe navigation doesn't fire
+    e.stopPropagation();
+
+    const startRange = caretAtPoint(startX, startY);
+    if (!startRange || !contentRef.current.contains(startRange.startContainer)) return;
+
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+
+    const isTap = Math.abs(dx) < 12 && Math.abs(dy) < 12;
+    if (isTap) {
+      // Single tap → select the word under the finger
+      sel.addRange(expandToWord(startRange));
+    } else {
+      // Drag → select from start to end point
+      const endRange = caretAtPoint(endX, endY);
+      if (!endRange) { sel.addRange(expandToWord(startRange)); return; }
+      try {
+        const range = document.createRange();
+        const cmp = startRange.compareBoundaryPoints(Range.START_TO_START, endRange);
+        if (cmp <= 0) {
+          range.setStart(startRange.startContainer, startRange.startOffset);
+          range.setEnd(endRange.startContainer, endRange.startOffset);
+        } else {
+          range.setStart(endRange.startContainer, endRange.startOffset);
+          range.setEnd(startRange.startContainer, startRange.startOffset);
+        }
+        if (!range.collapsed) sel.addRange(range);
+      } catch {
+        sel.addRange(expandToWord(startRange));
+      }
+    }
+    // selectionchange fires → shows the highlight bar
+  }, []);
 
   const navigateToHighlight = useCallback((h: Highlight) => {
     pendingScrollToHighlight.current = h.id;
@@ -604,17 +694,29 @@ export default function Reader({ bookId }: { bookId: string }) {
             )}
           </div>
         ) : (
-          <div className="max-w-[65ch] mx-auto">
+          <div className="max-w-[65ch] mx-auto relative">
             <div
               ref={contentRef}
-              className="select-text"
               style={{
                 fontSize: `${fontSize}px`,
                 lineHeight: 1.9,
                 fontFamily: FONTS[fontFamily].style,
+                WebkitUserSelect: isTouchDevice ? 'none' : 'text',
+                userSelect: isTouchDevice ? 'none' : 'text',
               }}
               dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
             />
+            {/* Transparent overlay on touch devices — intercepts gestures so
+                native copy/paste toolbar never appears; forwards selections to
+                our selectionchange handler via the Selection API. */}
+            {isTouchDevice && (
+              <div
+                className="absolute inset-0"
+                style={{ touchAction: 'pan-y' }}
+                onTouchStart={handleTouchSelectStart}
+                onTouchEnd={handleTouchSelectEnd}
+              />
+            )}
           </div>
         )}
       </main>
