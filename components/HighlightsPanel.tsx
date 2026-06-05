@@ -157,7 +157,7 @@ export default function HighlightsPanel({
                           {h.text}
                         </p>
                         <p className="text-xs mt-1 opacity-35 tabular-nums" style={{ color: t.fg }}>
-                          Page {h.pageNumber}
+                          Page {h.pageNumber} · line ~{Math.floor(h.startOffset / 65) + 1}
                         </p>
                       </div>
                     </div>

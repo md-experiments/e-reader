@@ -188,15 +188,23 @@ export default function Reader({ bookId }: { bookId: string }) {
     }
   }, [loading, bookId, currentPage]);
 
-  // On page navigation: scroll to top and briefly pause saving so we don't
-  // overwrite the saved position with 0 from the programmatic scroll
+  // On page navigation: restore the saved scroll position for that page
+  // (same logic as the initial-load restore, but runs on every page change).
   useEffect(() => {
     if (!scrollRestoredRef.current) return;
     scrollSavingEnabled.current = false;
-    mainRef.current?.scrollTo({ top: 0 });
-    const t = setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
-    return () => clearTimeout(t);
-  }, [currentPage]);
+    try {
+      const saved = localStorage.getItem(`lexis-scroll-${bookId}-${currentPage}`);
+      const top = saved ? parseInt(saved, 10) : 0;
+      requestAnimationFrame(() => {
+        mainRef.current?.scrollTo({ top });
+        setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
+      });
+    } catch {
+      mainRef.current?.scrollTo({ top: 0 });
+      setTimeout(() => { scrollSavingEnabled.current = true; }, 200);
+    }
+  }, [currentPage, bookId]);
 
   // Load book + progress
   useEffect(() => {
@@ -355,10 +363,18 @@ export default function Reader({ bookId }: { bookId: string }) {
   }, [bookId]);
 
   const navigateToHighlight = useCallback((h: Highlight) => {
-    pendingScrollToHighlight.current = h.id;
-    setCurrentPage(h.pageNumber);
     setShowHighlightsPanel(false);
-  }, []);
+    if (h.pageNumber === currentPage) {
+      // Already on the right page — setCurrentPage would be a no-op, so the
+      // pending-scroll effect would never fire. Scroll directly instead.
+      setTimeout(() => {
+        document.getElementById(`hl-${h.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    } else {
+      pendingScrollToHighlight.current = h.id;
+      setCurrentPage(h.pageNumber);
+    }
+  }, [currentPage]);
 
   const handleDeleteHighlight = useCallback(async (h: Highlight) => {
     if (!user) return;
