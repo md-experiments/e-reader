@@ -84,34 +84,6 @@ function saveSettings(settings: Record<string, unknown>) {
   } catch {}
 }
 
-// ── Touch-selection helpers (mobile only) ─────────────────────────────────────
-
-function caretAtPoint(x: number, y: number): Range | null {
-  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
-  // Firefox
-  const pos = (document as unknown as { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null }).caretPositionFromPoint?.(x, y);
-  if (pos) {
-    const r = document.createRange();
-    r.setStart(pos.offsetNode, pos.offset);
-    r.collapse(true);
-    return r;
-  }
-  return null;
-}
-
-function expandToWord(range: Range): Range {
-  const r = range.cloneRange();
-  const node = r.startContainer;
-  if (node.nodeType !== Node.TEXT_NODE) return r;
-  const text = node.textContent ?? '';
-  let s = r.startOffset;
-  let e = s;
-  while (s > 0 && !/\s/.test(text[s - 1])) s--;
-  while (e < text.length && !/\s/.test(text[e])) e++;
-  if (s < e) { r.setStart(node, s); r.setEnd(node, e); }
-  return r;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface ColorPickerState {
@@ -151,13 +123,6 @@ export default function Reader({ bookId }: { bookId: string }) {
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touchSelectStart = useRef<{ x: number; y: number } | null>(null);
-
-  // Detect touch-primary device after mount (avoids hydration mismatch)
-  const [isTouchDevice, setIsTouchDevice] = useState(false);
-  useEffect(() => {
-    setIsTouchDevice(window.matchMedia('(pointer: coarse)').matches);
-  }, []);
 
   // Scroll position persistence
   const scrollRestoredRef = useRef(false);
@@ -317,46 +282,6 @@ export default function Reader({ bookId }: { bookId: string }) {
     }, 500);
   }, [bookId]);
 
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleTouchSelectStart = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    touchSelectStart.current = { x: touch.clientX, y: touch.clientY };
-    longPressTimer.current = setTimeout(() => {
-      if (!contentRef.current) return;
-      const range = caretAtPoint(touch.clientX, touch.clientY);
-      if (!range || !contentRef.current.contains(range.startContainer)) return;
-      const wordRange = expandToWord(range);
-      if (wordRange.collapsed) return;
-      const sel = window.getSelection();
-      if (!sel) return;
-      sel.removeAllRanges();
-      sel.addRange(wordRange);
-      if (navigator.vibrate) navigator.vibrate(30);
-      // selectionchange fires → highlight bar appears
-    }, 500);
-  }, []);
-
-  const handleTouchSelectMove = useCallback((e: React.TouchEvent) => {
-    if (!longPressTimer.current || !touchSelectStart.current) return;
-    const touch = e.touches[0];
-    const dx = Math.abs(touch.clientX - touchSelectStart.current.x);
-    const dy = Math.abs(touch.clientY - touchSelectStart.current.y);
-    // Any real movement cancels the long-press (user is scrolling)
-    if (dx > 8 || dy > 8) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const handleTouchSelectEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    touchSelectStart.current = null;
-  }, []);
-
   const navigateToHighlight = useCallback((h: Highlight) => {
     pendingScrollToHighlight.current = h.id;
     setCurrentPage(h.pageNumber);
@@ -364,7 +289,8 @@ export default function Reader({ bookId }: { bookId: string }) {
   }, []);
 
   const dismiss = useCallback(() => {
-    window.getSelection()?.removeAllRanges();
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
     setColorPicker(null);
     setShowSettings(false);
     setShowHighlightsPanel(false);
@@ -686,13 +612,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 fontSize: `${fontSize}px`,
                 lineHeight: 1.9,
                 fontFamily: FONTS[fontFamily].style,
-                WebkitUserSelect: isTouchDevice ? 'none' : 'text',
-                userSelect: isTouchDevice ? 'none' : 'text',
-                touchAction: isTouchDevice ? 'pan-y' : undefined,
               }}
-              onTouchStart={isTouchDevice ? handleTouchSelectStart : undefined}
-              onTouchMove={isTouchDevice ? handleTouchSelectMove : undefined}
-              onTouchEnd={isTouchDevice ? handleTouchSelectEnd : undefined}
               dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
             />
           </div>
