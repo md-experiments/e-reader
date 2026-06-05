@@ -209,30 +209,62 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => { if (progressTimer.current) clearTimeout(progressTimer.current); };
   }, [user, bookId, currentPage, book, loading]);
 
-  // Use selectionchange instead of mouseup so the color bar appears below the
-  // native selection toolbar on mobile rather than competing with it.
+  // Show the highlight colour bar when the user has a stable non-collapsed
+  // selection inside the reading content.
+  //
+  // Two timers prevent the common failure modes:
+  //  • showTimer (500 ms): only fires after the selection has been stable for
+  //    500 ms, so single taps and in-progress handle drags don't trigger it.
+  //  • clearTimer (200 ms grace): absorbs the momentary selection collapse that
+  //    browsers fire during a click event before re-confirming the selection,
+  //    which previously caused the bar to flash and disappear on desktop.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let showTimer: ReturnType<typeof setTimeout> | null = null;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+
     const onSelectionChange = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const sel = window.getSelection();
-        if (!sel || sel.isCollapsed || !contentRef.current) { setColorPicker(null); return; }
-        const selectedText = sel.toString().trim();
-        if (!selectedText || selectedText.length < 2) { setColorPicker(null); return; }
+      if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !contentRef.current) {
+        // Start grace-period before clearing — a real deselect will survive it;
+        // a click-induced momentary collapse will be cancelled by the next event.
+        if (!clearTimer) {
+          clearTimer = setTimeout(() => { clearTimer = null; setColorPicker(null); }, 200);
+        }
+        return;
+      }
+
+      // Non-collapsed selection — cancel any pending clear
+      if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+
+      const selectedText = sel.toString().trim();
+      if (!selectedText || selectedText.length < 2) return;
+
+      showTimer = setTimeout(() => {
+        showTimer = null;
+        const s = window.getSelection();
+        if (!s || s.isCollapsed || !contentRef.current) return;
+        const text = s.toString().trim();
+        if (!text || text.length < 2) return;
         try {
-          const range = sel.getRangeAt(0);
-          if (!contentRef.current.contains(range.commonAncestorContainer)) { setColorPicker(null); return; }
+          const range = s.getRangeAt(0);
+          if (!contentRef.current.contains(range.commonAncestorContainer)) return;
           const preRange = document.createRange();
           preRange.setStart(contentRef.current, 0);
           preRange.setEnd(range.startContainer, range.startOffset);
           const startOffset = preRange.toString().length;
-          setColorPicker({ x: 0, y: 0, text: selectedText, startOffset, endOffset: startOffset + selectedText.length });
-        } catch { setColorPicker(null); }
-      }, 120);
+          setColorPicker({ x: 0, y: 0, text, startOffset, endOffset: startOffset + text.length });
+        } catch { /* selection became invalid */ }
+      }, 500);
     };
+
     document.addEventListener('selectionchange', onSelectionChange);
-    return () => { document.removeEventListener('selectionchange', onSelectionChange); if (timer) clearTimeout(timer); };
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+      if (showTimer) clearTimeout(showTimer);
+      if (clearTimer) clearTimeout(clearTimer);
+    };
   }, []);
 
   // Fetch all highlights when the panel opens
@@ -288,10 +320,9 @@ export default function Reader({ bookId }: { bookId: string }) {
     setShowHighlightsPanel(false);
   }, []);
 
+  // Only close panels — colorPicker is managed entirely by the selectionchange
+  // handler, which clears it when the selection collapses.
   const dismiss = useCallback(() => {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    setColorPicker(null);
     setShowSettings(false);
     setShowHighlightsPanel(false);
   }, []);
