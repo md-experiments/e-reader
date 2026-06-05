@@ -113,6 +113,19 @@ export async function addHighlight(
   return highlight;
 }
 
+export async function getHighlightsForBook(uid: string, bookId: string): Promise<Highlight[]> {
+  const db = getFirebaseDb();
+  const snap = await getDocs(
+    query(collection(db, 'users', uid, 'highlights'), where('bookId', '==', bookId)),
+  );
+  return snap.docs.map((d) => ({
+    ...d.data(),
+    id: d.id,
+    color: d.data().color as HighlightColor,
+    createdAt: (d.data().createdAt as Timestamp)?.toDate?.() ?? new Date(),
+  })) as Highlight[];
+}
+
 export async function getHighlightsForPage(
   uid: string,
   bookId: string,

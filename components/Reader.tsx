@@ -10,6 +10,7 @@ import {
   saveProgress,
   updateBook,
   getHighlightsForPage,
+  getHighlightsForBook,
   addHighlight,
   getStorageJson,
   getTranslation,
@@ -19,6 +20,7 @@ import { renderHighlights, HIGHLIGHT_COLORS } from '@/components/Highlights';
 import PdfViewer from '@/components/PdfViewer';
 import EpubViewer from '@/components/EpubViewer';
 import TocSidebar from '@/components/TocSidebar';
+import HighlightsPanel from '@/components/HighlightsPanel';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
 // ── Themes ────────────────────────────────────────────────────────────────────
@@ -106,6 +108,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [showToc, setShowToc] = useState(false);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [translationLoading, setTranslationLoading] = useState(false);
+  const [showHighlightsPanel, setShowHighlightsPanel] = useState(false);
+  const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
+  const [allHighlightsLoading, setAllHighlightsLoading] = useState(false);
+  const pendingScrollToHighlight = useRef<string | null>(null);
 
   // Settings — initialised from localStorage immediately to avoid flash
   const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
@@ -203,28 +209,51 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => { if (progressTimer.current) clearTimeout(progressTimer.current); };
   }, [user, bookId, currentPage, book, loading]);
 
-  const handleMouseUp = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !contentRef.current) return;
-    const selectedText = selection.toString().trim();
-    if (!selectedText || selectedText.length < 2) return;
-
-    const range = selection.getRangeAt(0);
-    const container = contentRef.current;
-    const preRange = document.createRange();
-    preRange.setStart(container, 0);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    const startOffset = preRange.toString().length;
-
-    const rect = range.getBoundingClientRect();
-    setColorPicker({
-      x: Math.min(rect.left + rect.width / 2, window.innerWidth - 160),
-      y: rect.top + window.scrollY - 52,
-      text: selectedText,
-      startOffset,
-      endOffset: startOffset + selectedText.length,
-    });
+  // Use selectionchange instead of mouseup so the color bar appears below the
+  // native selection toolbar on mobile rather than competing with it.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onSelectionChange = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !contentRef.current) { setColorPicker(null); return; }
+        const selectedText = sel.toString().trim();
+        if (!selectedText || selectedText.length < 2) { setColorPicker(null); return; }
+        try {
+          const range = sel.getRangeAt(0);
+          if (!contentRef.current.contains(range.commonAncestorContainer)) { setColorPicker(null); return; }
+          const preRange = document.createRange();
+          preRange.setStart(contentRef.current, 0);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          const startOffset = preRange.toString().length;
+          setColorPicker({ x: 0, y: 0, text: selectedText, startOffset, endOffset: startOffset + selectedText.length });
+        } catch { setColorPicker(null); }
+      }, 120);
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => { document.removeEventListener('selectionchange', onSelectionChange); if (timer) clearTimeout(timer); };
   }, []);
+
+  // Fetch all highlights when the panel opens
+  useEffect(() => {
+    if (!showHighlightsPanel || !user) return;
+    setAllHighlightsLoading(true);
+    getHighlightsForBook(user.uid, bookId).then((hs) => {
+      setAllHighlights(hs);
+      setAllHighlightsLoading(false);
+    });
+  }, [showHighlightsPanel, user, bookId]);
+
+  // After highlights load for a page, scroll to a pending highlight mark
+  useEffect(() => {
+    if (!pendingScrollToHighlight.current) return;
+    const id = pendingScrollToHighlight.current;
+    pendingScrollToHighlight.current = null;
+    setTimeout(() => {
+      document.getElementById(`hl-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }, [highlights]);
 
   const saveHighlight = useCallback(
     async (color: HighlightColor) => {
@@ -238,8 +267,8 @@ export default function Reader({ bookId }: { bookId: string }) {
         endOffset: colorPicker.endOffset,
       });
       setHighlights((prev) => [...prev, h]);
-      setColorPicker(null);
       window.getSelection()?.removeAllRanges();
+      setColorPicker(null);
     },
     [user, colorPicker, bookId, currentPage],
   );
@@ -253,9 +282,17 @@ export default function Reader({ bookId }: { bookId: string }) {
     }, 500);
   }, [bookId]);
 
+  const navigateToHighlight = useCallback((h: Highlight) => {
+    pendingScrollToHighlight.current = h.id;
+    setCurrentPage(h.pageNumber);
+    setShowHighlightsPanel(false);
+  }, []);
+
   const dismiss = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
     setColorPicker(null);
     setShowSettings(false);
+    setShowHighlightsPanel(false);
   }, []);
 
   const saveToc = useCallback(
@@ -367,6 +404,24 @@ export default function Reader({ bookId }: { bookId: string }) {
               Aa
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowHighlightsPanel((s) => !s);
+              setShowSettings(false);
+              setShowToc(false);
+            }}
+            className="text-xs px-2.5 py-1 rounded border transition-colors"
+            style={{
+              borderColor: t.border,
+              color: t.fg,
+              backgroundColor: showHighlightsPanel ? t.hover : 'transparent',
+              opacity: showHighlightsPanel ? 1 : 0.55,
+            }}
+            title="Highlights"
+          >
+            ✦
+          </button>
           {isAdmin && (
             <button
               onClick={(e) => { e.stopPropagation(); handleTranslate(); setShowSettings(false); }}
@@ -552,7 +607,6 @@ export default function Reader({ bookId }: { bookId: string }) {
           <div className="max-w-[65ch] mx-auto">
             <div
               ref={contentRef}
-              onMouseUp={handleMouseUp}
               className="select-text"
               style={{
                 fontSize: `${fontSize}px`,
@@ -565,25 +619,29 @@ export default function Reader({ bookId }: { bookId: string }) {
         )}
       </main>
 
-      {/* Color picker */}
+      {/* Highlight bar — fixed at bottom, above the footer, safe on mobile */}
       {colorPicker && (
         <div
-          className="fixed z-50 bg-white shadow-xl rounded-full px-3 py-2 flex items-center gap-1.5 border border-gray-100"
-          style={{ left: colorPicker.x - 100, top: colorPicker.y }}
+          className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-between px-5 border-t shadow-lg"
+          style={{ backgroundColor: t.bg, borderColor: t.border, paddingTop: '0.75rem', paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
           onClick={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
         >
-          {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
-            <button
-              key={color}
-              title={color}
-              onClick={() => saveHighlight(color)}
-              className="w-6 h-6 rounded-full border border-white/50 shadow-sm hover:scale-125 transition-transform"
-              style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
-            />
-          ))}
+          <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
+          <div className="flex items-center gap-3">
+            {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
+              <button
+                key={color}
+                onPointerDown={(e) => { e.preventDefault(); saveHighlight(color); }}
+                className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
+                style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
+              />
+            ))}
+          </div>
           <button
-            onClick={() => setColorPicker(null)}
-            className="ml-1 text-gray-400 hover:text-gray-700 text-xs leading-none"
+            onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setColorPicker(null); }}
+            className="text-sm opacity-40 hover:opacity-100 transition-opacity"
+            style={{ color: t.fg }}
           >
             ✕
           </button>
@@ -639,6 +697,17 @@ export default function Reader({ bookId }: { bookId: string }) {
           onNavigate={(page) => setCurrentPage(page)}
           onClose={() => setShowToc(false)}
           onSave={saveToc}
+          t={t}
+        />
+      )}
+
+      {/* Highlights Panel */}
+      {showHighlightsPanel && (
+        <HighlightsPanel
+          highlights={allHighlights}
+          loading={allHighlightsLoading}
+          onNavigate={navigateToHighlight}
+          onClose={() => setShowHighlightsPanel(false)}
           t={t}
         />
       )}

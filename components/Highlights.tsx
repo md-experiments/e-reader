@@ -25,7 +25,7 @@ function buildHighlightedText(text: string, highlights: Highlight[]): string {
     if (start >= end) continue;
     if (start > pos) html += escapeHtml(text.slice(pos, start));
     const color = HIGHLIGHT_COLORS[h.color] ?? HIGHLIGHT_COLORS.yellow;
-    html += `<mark style="background-color:${color};border-radius:2px;padding:0 1px">${escapeHtml(text.slice(start, end))}</mark>`;
+    html += `<mark id="hl-${h.id}" style="background-color:${color};border-radius:2px;padding:0 1px">${escapeHtml(text.slice(start, end))}</mark>`;
     pos = end;
   }
 
