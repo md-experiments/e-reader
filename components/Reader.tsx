@@ -149,6 +149,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the highlight bar is locked-in (visible). Read by the
+  // selectionchange handler (which has a stale closure) and by dismiss().
+  const colorPickerActiveRef = useRef(false);
 
   // Scroll position persistence
   const scrollRestoredRef = useRef(false);
@@ -156,6 +159,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPageRef = useRef(currentPage);
   useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
+  useEffect(() => { colorPickerActiveRef.current = colorPicker !== null; }, [colorPicker]);
 
   // Persist settings whenever they change
   useEffect(() => { saveSettings({ fontSize }); }, [fontSize]);
@@ -253,8 +257,13 @@ export default function Reader({ bookId }: { bookId: string }) {
 
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !contentRef.current) {
-        // Start grace-period before clearing — a real deselect will survive it;
-        // a click-induced momentary collapse will be cancelled by the next event.
+        // When the bar is locked-in (visible), the user may have clicked the
+        // note input or another part of the bar — don't auto-clear on selection
+        // collapse. Dismissal is now handled explicitly by dismiss() or the ✕
+        // button.
+        if (colorPickerActiveRef.current) return;
+        // Otherwise start grace-period before clearing — a real deselect will
+        // survive it; a click-induced momentary collapse will be cancelled.
         if (!clearTimer) {
           clearTimer = setTimeout(() => { clearTimer = null; setColorPicker(null); }, 200);
         }
@@ -370,9 +379,14 @@ export default function Reader({ bookId }: { bookId: string }) {
     }
   }, [user, currentPage]);
 
-  // Only close panels — colorPicker is managed entirely by the selectionchange
-  // handler, which clears it when the selection collapses.
   const dismiss = useCallback(() => {
+    // If the highlight bar is locked-in and the user clicked outside it,
+    // dismiss the bar and drop the selection.
+    if (colorPickerActiveRef.current) {
+      window.getSelection()?.removeAllRanges();
+      setNoteInput('');
+      setColorPicker(null);
+    }
     setShowSettings(false);
     setShowHighlightsPanel(false);
   }, []);
@@ -719,8 +733,25 @@ export default function Reader({ bookId }: { bookId: string }) {
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        {/* Optional note input */}
-        <div className="px-4 pt-2.5 pb-1">
+        {/* Header row: label + dismiss */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-1">
+          <span className="text-xs font-semibold opacity-50" style={{ color: t.fg }}>Highlight</span>
+          <button
+            onPointerDown={(e) => {
+              e.preventDefault();
+              window.getSelection()?.removeAllRanges();
+              setNoteInput('');
+              setColorPicker(null);
+            }}
+            className="w-7 h-7 flex items-center justify-center rounded-full opacity-40 hover:opacity-100 active:opacity-100 transition-opacity"
+            style={{ color: t.fg }}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+        {/* Note input */}
+        <div className="px-4 pb-2">
           <input
             type="text"
             value={noteInput}
@@ -730,26 +761,16 @@ export default function Reader({ bookId }: { bookId: string }) {
             style={{ backgroundColor: 'transparent', borderColor: t.border, color: t.fg }}
           />
         </div>
-        {/* Color picker row */}
-        <div className="flex items-center justify-between px-5 py-2">
-          <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
-          <div className="flex items-center gap-3">
-            {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
-              <button
-                key={color}
-                onPointerDown={(e) => { e.preventDefault(); if (colorPicker) saveHighlight(color); }}
-                className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
-                style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
-              />
-            ))}
-          </div>
-          <button
-            onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setNoteInput(''); setColorPicker(null); }}
-            className="text-sm opacity-40 hover:opacity-100 transition-opacity"
-            style={{ color: t.fg }}
-          >
-            ✕
-          </button>
+        {/* Colour swatches */}
+        <div className="flex items-center justify-center gap-4 px-5 pb-3">
+          {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
+            <button
+              key={color}
+              onPointerDown={(e) => { e.preventDefault(); if (colorPicker) saveHighlight(color); }}
+              className="w-9 h-9 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
+              style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
+            />
+          ))}
         </div>
       </div>
 
