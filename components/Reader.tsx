@@ -317,59 +317,44 @@ export default function Reader({ bookId }: { bookId: string }) {
     }, 500);
   }, [bookId]);
 
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleTouchSelectStart = useCallback((e: React.TouchEvent) => {
-    touchSelectStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    const touch = e.touches[0];
+    touchSelectStart.current = { x: touch.clientX, y: touch.clientY };
+    longPressTimer.current = setTimeout(() => {
+      if (!contentRef.current) return;
+      const range = caretAtPoint(touch.clientX, touch.clientY);
+      if (!range || !contentRef.current.contains(range.startContainer)) return;
+      const wordRange = expandToWord(range);
+      if (wordRange.collapsed) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      sel.removeAllRanges();
+      sel.addRange(wordRange);
+      if (navigator.vibrate) navigator.vibrate(30);
+      // selectionchange fires → highlight bar appears
+    }, 500);
   }, []);
 
-  const handleTouchSelectEnd = useCallback((e: React.TouchEvent) => {
-    if (!touchSelectStart.current || !contentRef.current) return;
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const dx = endX - touchSelectStart.current.x;
-    const dy = endY - touchSelectStart.current.y;
-    const startX = touchSelectStart.current.x;
-    const startY = touchSelectStart.current.y;
-    touchSelectStart.current = null;
-
-    // Large vertical movement = scroll, let it pass through
-    if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) return;
-    // Large horizontal movement = page-swipe navigation, let it pass through
-    if (Math.abs(dx) >= 60 && Math.abs(dx) >= Math.abs(dy) * 1.5) return;
-
-    // This is a selection gesture — stop propagation so swipe navigation doesn't fire
-    e.stopPropagation();
-
-    const startRange = caretAtPoint(startX, startY);
-    if (!startRange || !contentRef.current.contains(startRange.startContainer)) return;
-
-    const sel = window.getSelection();
-    if (!sel) return;
-    sel.removeAllRanges();
-
-    const isTap = Math.abs(dx) < 12 && Math.abs(dy) < 12;
-    if (isTap) {
-      // Single tap → select the word under the finger
-      sel.addRange(expandToWord(startRange));
-    } else {
-      // Drag → select from start to end point
-      const endRange = caretAtPoint(endX, endY);
-      if (!endRange) { sel.addRange(expandToWord(startRange)); return; }
-      try {
-        const range = document.createRange();
-        const cmp = startRange.compareBoundaryPoints(Range.START_TO_START, endRange);
-        if (cmp <= 0) {
-          range.setStart(startRange.startContainer, startRange.startOffset);
-          range.setEnd(endRange.startContainer, endRange.startOffset);
-        } else {
-          range.setStart(endRange.startContainer, endRange.startOffset);
-          range.setEnd(startRange.startContainer, startRange.startOffset);
-        }
-        if (!range.collapsed) sel.addRange(range);
-      } catch {
-        sel.addRange(expandToWord(startRange));
-      }
+  const handleTouchSelectMove = useCallback((e: React.TouchEvent) => {
+    if (!longPressTimer.current || !touchSelectStart.current) return;
+    const touch = e.touches[0];
+    const dx = Math.abs(touch.clientX - touchSelectStart.current.x);
+    const dy = Math.abs(touch.clientY - touchSelectStart.current.y);
+    // Any real movement cancels the long-press (user is scrolling)
+    if (dx > 8 || dy > 8) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
-    // selectionchange fires → shows the highlight bar
+  }, []);
+
+  const handleTouchSelectEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    touchSelectStart.current = null;
   }, []);
 
   const navigateToHighlight = useCallback((h: Highlight) => {
@@ -714,6 +699,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 className="absolute inset-0"
                 style={{ touchAction: 'pan-y' }}
                 onTouchStart={handleTouchSelectStart}
+                onTouchMove={handleTouchSelectMove}
                 onTouchEnd={handleTouchSelectEnd}
               />
             )}
