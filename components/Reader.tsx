@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { useIsAdmin } from '@/hooks/useIsAdmin';
@@ -83,6 +83,29 @@ function saveSettings(settings: Record<string, unknown>) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...existing, ...settings }));
   } catch {}
 }
+
+// ── Page content (memoised) ───────────────────────────────────────────────────
+// Kept in a separate memo component so that state changes in the parent
+// (e.g. colorPicker appearing) don't cause React to reconcile the content div.
+// Without this, React would re-run dangerouslySetInnerHTML, and on iOS Safari
+// any DOM touch—even a no-op—can drop the visual text-selection highlight.
+
+interface PageContentProps {
+  html: string;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+  fontSize: number;
+  fontFamily: FontFamily;
+}
+
+const PageContent = memo(function PageContent({ html, contentRef, fontSize, fontFamily }: PageContentProps) {
+  return (
+    <div
+      ref={contentRef}
+      style={{ fontSize: `${fontSize}px`, lineHeight: 1.9, fontFamily: FONTS[fontFamily].style }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+});
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -403,6 +426,13 @@ export default function Reader({ bookId }: { bookId: string }) {
   const pageSegments = currentPageData?.segments;
   const pct = Math.round((currentPage / (book?.pageCount ?? 1)) * 100);
 
+  // Memoised so PageContent receives a stable prop reference and React.memo
+  // can bail out when colorPicker (or any other unrelated state) changes.
+  const contentHtml = useMemo(
+    () => renderHighlights(pageText, highlights, pageSegments),
+    [pageText, highlights, pageSegments],
+  );
+
   return (
     <div
       className="flex flex-col overflow-hidden"
@@ -637,47 +667,51 @@ export default function Reader({ bookId }: { bookId: string }) {
           </div>
         ) : (
           <div className="max-w-[65ch] mx-auto">
-            <div
-              ref={contentRef}
-              style={{
-                fontSize: `${fontSize}px`,
-                lineHeight: 1.9,
-                fontFamily: FONTS[fontFamily].style,
-              }}
-              dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
+            <PageContent
+              html={contentHtml}
+              contentRef={contentRef}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
             />
           </div>
         )}
       </main>
 
-      {/* Highlight bar — fixed at bottom, above the footer, safe on mobile */}
-      {colorPicker && (
-        <div
-          className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-between px-5 border-t shadow-lg"
-          style={{ backgroundColor: t.bg, borderColor: t.border, paddingTop: '0.75rem', paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-          onClick={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-        >
-          <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
-          <div className="flex items-center gap-3">
-            {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
-              <button
-                key={color}
-                onPointerDown={(e) => { e.preventDefault(); saveHighlight(color); }}
-                className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
-                style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
-              />
-            ))}
-          </div>
-          <button
-            onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setColorPicker(null); }}
-            className="text-sm opacity-40 hover:opacity-100 transition-opacity"
-            style={{ color: t.fg }}
-          >
-            ✕
-          </button>
+      {/* Highlight bar — always in the DOM; toggled via CSS only so that iOS
+          Safari never sees a DOM mutation while a text selection is active,
+          which would drop the visual selection highlight. */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-between px-5 border-t shadow-lg"
+        style={{
+          backgroundColor: t.bg,
+          borderColor: t.border,
+          paddingTop: '0.75rem',
+          paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+          opacity: colorPicker ? 1 : 0,
+          pointerEvents: colorPicker ? 'auto' : 'none',
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
+        <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
+        <div className="flex items-center gap-3">
+          {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
+            <button
+              key={color}
+              onPointerDown={(e) => { e.preventDefault(); if (colorPicker) saveHighlight(color); }}
+              className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
+              style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
+            />
+          ))}
         </div>
-      )}
+        <button
+          onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setColorPicker(null); }}
+          className="text-sm opacity-40 hover:opacity-100 transition-opacity"
+          style={{ color: t.fg }}
+        >
+          ✕
+        </button>
+      </div>
 
       {/* Bottom nav */}
       <footer
