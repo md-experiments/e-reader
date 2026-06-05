@@ -413,6 +413,13 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   const t = THEMES[theme];
 
+  // Must be before any early return (Rules of Hooks). Reads directly from state
+  // to produce a stable reference for PageContent's React.memo comparison.
+  const contentHtml = useMemo(() => {
+    const data = pages[currentPage - 1];
+    return renderHighlights(data?.text ?? '', highlights, data?.segments);
+  }, [pages, currentPage, highlights]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: t.bg }}>
@@ -425,13 +432,6 @@ export default function Reader({ bookId }: { bookId: string }) {
   const pageText = currentPageData?.text ?? '';
   const pageSegments = currentPageData?.segments;
   const pct = Math.round((currentPage / (book?.pageCount ?? 1)) * 100);
-
-  // Memoised so PageContent receives a stable prop reference and React.memo
-  // can bail out when colorPicker (or any other unrelated state) changes.
-  const contentHtml = useMemo(
-    () => renderHighlights(pageText, highlights, pageSegments),
-    [pageText, highlights, pageSegments],
-  );
 
   return (
     <div
