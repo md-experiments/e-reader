@@ -113,6 +113,16 @@ export async function addHighlight(
   return highlight;
 }
 
+export async function deleteHighlight(uid: string, highlightId: string): Promise<void> {
+  const db = getFirebaseDb();
+  await deleteDoc(doc(db, 'users', uid, 'highlights', highlightId));
+}
+
+export async function updateHighlightNote(uid: string, highlightId: string, note: string): Promise<void> {
+  const db = getFirebaseDb();
+  await updateDoc(doc(db, 'users', uid, 'highlights', highlightId), { note: note || null });
+}
+
 export async function getHighlightsForBook(uid: string, bookId: string): Promise<Highlight[]> {
   const db = getFirebaseDb();
   const snap = await getDocs(

@@ -12,6 +12,8 @@ import {
   getHighlightsForPage,
   getHighlightsForBook,
   addHighlight,
+  deleteHighlight,
+  updateHighlightNote,
   getStorageJson,
   getTranslation,
   saveTranslation,
@@ -127,6 +129,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [colorPicker, setColorPicker] = useState<ColorPickerState | null>(null);
+  const [noteInput, setNoteInput] = useState('');
   const [viewMode, setViewMode] = useState<'reader' | 'pdf' | 'translation'>('reader');
   const [showToc, setShowToc] = useState(false);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
@@ -277,6 +280,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           preRange.setStart(contentRef.current, 0);
           preRange.setEnd(range.startContainer, range.startOffset);
           const startOffset = preRange.toString().length;
+          setNoteInput('');
           setColorPicker({ x: 0, y: 0, text, startOffset, endOffset: startOffset + text.length });
         } catch { /* selection became invalid */ }
       }, 500);
@@ -313,6 +317,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const saveHighlight = useCallback(
     async (color: HighlightColor) => {
       if (!user || !colorPicker) return;
+      const note = noteInput.trim() || undefined;
       const h = await addHighlight(user.uid, {
         bookId,
         text: colorPicker.text,
@@ -320,12 +325,15 @@ export default function Reader({ bookId }: { bookId: string }) {
         color,
         startOffset: colorPicker.startOffset,
         endOffset: colorPicker.endOffset,
+        ...(note ? { note } : {}),
       });
       setHighlights((prev) => [...prev, h]);
+      setAllHighlights((prev) => [...prev, h]);
       window.getSelection()?.removeAllRanges();
+      setNoteInput('');
       setColorPicker(null);
     },
-    [user, colorPicker, bookId, currentPage],
+    [user, colorPicker, noteInput, bookId, currentPage],
   );
 
   const handleScroll = useCallback(() => {
@@ -342,6 +350,25 @@ export default function Reader({ bookId }: { bookId: string }) {
     setCurrentPage(h.pageNumber);
     setShowHighlightsPanel(false);
   }, []);
+
+  const handleDeleteHighlight = useCallback(async (h: Highlight) => {
+    if (!user) return;
+    await deleteHighlight(user.uid, h.id);
+    setAllHighlights((prev) => prev.filter((x) => x.id !== h.id));
+    if (h.pageNumber === currentPage) {
+      setHighlights((prev) => prev.filter((x) => x.id !== h.id));
+    }
+  }, [user, currentPage]);
+
+  const handleUpdateNote = useCallback(async (h: Highlight, note: string) => {
+    if (!user) return;
+    await updateHighlightNote(user.uid, h.id, note);
+    const updated = { ...h, note: note || undefined };
+    setAllHighlights((prev) => prev.map((x) => (x.id === h.id ? updated : x)));
+    if (h.pageNumber === currentPage) {
+      setHighlights((prev) => prev.map((x) => (x.id === h.id ? updated : x)));
+    }
+  }, [user, currentPage]);
 
   // Only close panels — colorPicker is managed entirely by the selectionchange
   // handler, which clears it when the selection collapses.
@@ -681,11 +708,10 @@ export default function Reader({ bookId }: { bookId: string }) {
           Safari never sees a DOM mutation while a text selection is active,
           which would drop the visual selection highlight. */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-between px-5 border-t shadow-lg"
+        className="fixed bottom-0 left-0 right-0 z-30 flex flex-col border-t shadow-lg"
         style={{
           backgroundColor: t.bg,
           borderColor: t.border,
-          paddingTop: '0.75rem',
           paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
           opacity: colorPicker ? 1 : 0,
           pointerEvents: colorPicker ? 'auto' : 'none',
@@ -693,24 +719,38 @@ export default function Reader({ bookId }: { bookId: string }) {
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
-        <div className="flex items-center gap-3">
-          {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
-            <button
-              key={color}
-              onPointerDown={(e) => { e.preventDefault(); if (colorPicker) saveHighlight(color); }}
-              className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
-              style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
-            />
-          ))}
+        {/* Optional note input */}
+        <div className="px-4 pt-2.5 pb-1">
+          <input
+            type="text"
+            value={noteInput}
+            onChange={(e) => setNoteInput(e.target.value)}
+            placeholder="Add a note (optional)…"
+            className="w-full text-xs px-3 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-400"
+            style={{ backgroundColor: 'transparent', borderColor: t.border, color: t.fg }}
+          />
         </div>
-        <button
-          onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setColorPicker(null); }}
-          className="text-sm opacity-40 hover:opacity-100 transition-opacity"
-          style={{ color: t.fg }}
-        >
-          ✕
-        </button>
+        {/* Color picker row */}
+        <div className="flex items-center justify-between px-5 py-2">
+          <span className="text-xs font-medium opacity-40" style={{ color: t.fg }}>Highlight</span>
+          <div className="flex items-center gap-3">
+            {(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((color) => (
+              <button
+                key={color}
+                onPointerDown={(e) => { e.preventDefault(); if (colorPicker) saveHighlight(color); }}
+                className="w-8 h-8 rounded-full border-2 border-white shadow-md active:scale-95 transition-transform"
+                style={{ backgroundColor: HIGHLIGHT_COLORS[color] }}
+              />
+            ))}
+          </div>
+          <button
+            onPointerDown={(e) => { e.preventDefault(); window.getSelection()?.removeAllRanges(); setNoteInput(''); setColorPicker(null); }}
+            className="text-sm opacity-40 hover:opacity-100 transition-opacity"
+            style={{ color: t.fg }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Bottom nav */}
@@ -772,6 +812,8 @@ export default function Reader({ bookId }: { bookId: string }) {
           highlights={allHighlights}
           loading={allHighlightsLoading}
           onNavigate={navigateToHighlight}
+          onDelete={handleDeleteHighlight}
+          onUpdateNote={handleUpdateNote}
           onClose={() => setShowHighlightsPanel(false)}
           t={t}
         />

@@ -37,6 +37,7 @@ export interface Highlight {
   startOffset: number;
   endOffset: number;
   createdAt: Date;
+  note?: string;
 }
 
 export interface PageSegment {
