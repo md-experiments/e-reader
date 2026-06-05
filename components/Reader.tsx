@@ -679,7 +679,7 @@ export default function Reader({ bookId }: { bookId: string }) {
             )}
           </div>
         ) : (
-          <div className="max-w-[65ch] mx-auto relative">
+          <div className="max-w-[65ch] mx-auto">
             <div
               ref={contentRef}
               style={{
@@ -688,21 +688,13 @@ export default function Reader({ bookId }: { bookId: string }) {
                 fontFamily: FONTS[fontFamily].style,
                 WebkitUserSelect: isTouchDevice ? 'none' : 'text',
                 userSelect: isTouchDevice ? 'none' : 'text',
+                touchAction: isTouchDevice ? 'pan-y' : undefined,
               }}
+              onTouchStart={isTouchDevice ? handleTouchSelectStart : undefined}
+              onTouchMove={isTouchDevice ? handleTouchSelectMove : undefined}
+              onTouchEnd={isTouchDevice ? handleTouchSelectEnd : undefined}
               dangerouslySetInnerHTML={{ __html: renderHighlights(pageText, highlights, pageSegments) }}
             />
-            {/* Transparent overlay on touch devices — intercepts gestures so
-                native copy/paste toolbar never appears; forwards selections to
-                our selectionchange handler via the Selection API. */}
-            {isTouchDevice && (
-              <div
-                className="absolute inset-0"
-                style={{ touchAction: 'pan-y' }}
-                onTouchStart={handleTouchSelectStart}
-                onTouchMove={handleTouchSelectMove}
-                onTouchEnd={handleTouchSelectEnd}
-              />
-            )}
           </div>
         )}
       </main>
