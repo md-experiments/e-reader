@@ -50,17 +50,10 @@ export default function LibraryPage() {
     if (typeof window !== 'undefined' && window.innerWidth < 640) setSidebarOpen(false);
   }, []);
 
-  const handleSaveEdit = useCallback(
-    async (bookId: string, newTitle: string, newTags: string[]) => {
-      if (!user) return;
-      await updateBook(user.uid, bookId, { title: newTitle, tags: newTags });
-      setBooks((prev) =>
-        prev.map((b) => (b.id === bookId ? { ...b, title: newTitle, tags: newTags } : b)),
-      );
-      setEditingBook(null);
-    },
-    [user],
-  );
+  const handleBookSaved = useCallback((updated: Book) => {
+    setBooks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+    setEditingBook(null);
+  }, []);
 
   const handleDelete = useCallback(
     async (bookId: string) => {
@@ -227,7 +220,7 @@ export default function LibraryPage() {
         <BookEditModal
           book={editingBook}
           allTags={allTags}
-          onSave={handleSaveEdit}
+          onSaved={handleBookSaved}
           onClose={() => setEditingBook(null)}
         />
       )}
@@ -387,14 +380,15 @@ function BookCard({
 function BookEditModal({
   book,
   allTags,
-  onSave,
+  onSaved,
   onClose,
 }: {
   book: Book;
   allTags: string[];
-  onSave: (bookId: string, title: string, tags: string[]) => Promise<void>;
+  onSaved: (updated: Book) => void;
   onClose: () => void;
 }) {
+  const { user } = useAuth();
   const [title, setTitle] = useState(book.title);
   const [tags, setTags] = useState<string[]>(book.tags ?? []);
   const [saving, setSaving] = useState(false);
@@ -404,14 +398,14 @@ function BookEditModal({
   const quickAddTags = allTags.filter((t) => !tags.includes(t));
 
   const handleSave = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || !user) return;
     setSaving(true);
     setSaveError('');
     try {
-      // Flush any typed-but-unconfirmed tag
       const p = pendingTag.trim();
       const finalTags = p && !tags.includes(p) ? [...tags, p] : tags;
-      await onSave(book.id, title.trim(), finalTags);
+      await updateBook(user.uid, book.id, { title: title.trim(), tags: finalTags });
+      onSaved({ ...book, title: title.trim(), tags: finalTags });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Save failed');
       setSaving(false);
