@@ -7,6 +7,7 @@ interface TagInputProps {
   onChange: (tags: string[]) => void;
   suggestions: string[];
   placeholder?: string;
+  onPendingChange?: (pending: string) => void;
 }
 
 export default function TagInput({
@@ -14,6 +15,7 @@ export default function TagInput({
   onChange,
   suggestions,
   placeholder = 'Add tag…',
+  onPendingChange,
 }: TagInputProps) {
   const [input, setInput] = useState('');
   const [open, setOpen] = useState(false);
@@ -28,6 +30,7 @@ export default function TagInput({
     if (t && !value.includes(t)) onChange([...value, t]);
     setInput('');
     setOpen(false);
+    onPendingChange?.('');
   };
 
   const remove = (tag: string) => onChange(value.filter((t) => t !== tag));
@@ -62,7 +65,7 @@ export default function TagInput({
         <input
           type="text"
           value={input}
-          onChange={(e) => { setInput(e.target.value); setOpen(true); }}
+          onChange={(e) => { setInput(e.target.value); setOpen(true); onPendingChange?.(e.target.value); }}
           onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); if (input.trim()) add(input); }

@@ -398,14 +398,24 @@ function BookEditModal({
   const [title, setTitle] = useState(book.title);
   const [tags, setTags] = useState<string[]>(book.tags ?? []);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [pendingTag, setPendingTag] = useState('');
 
   const quickAddTags = allTags.filter((t) => !tags.includes(t));
 
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
-    await onSave(book.id, title.trim(), tags);
-    setSaving(false);
+    setSaveError('');
+    try {
+      // Flush any typed-but-unconfirmed tag
+      const p = pendingTag.trim();
+      const finalTags = p && !tags.includes(p) ? [...tags, p] : tags;
+      await onSave(book.id, title.trim(), finalTags);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed');
+      setSaving(false);
+    }
   };
 
   return (
@@ -450,8 +460,12 @@ function BookEditModal({
             </div>
           )}
 
-          <TagInput value={tags} onChange={setTags} suggestions={allTags} />
+          <TagInput value={tags} onChange={setTags} suggestions={allTags} onPendingChange={setPendingTag} />
         </div>
+
+        {saveError && (
+          <p className="text-xs text-red-500 bg-red-50 px-3 py-2 rounded-lg">{saveError}</p>
+        )}
 
         <div className="flex gap-2 pt-1">
           <button
