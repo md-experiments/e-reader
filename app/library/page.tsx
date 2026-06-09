@@ -15,6 +15,7 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [editingBook, setEditingBook] = useState<Book | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -33,10 +34,21 @@ export default function LibraryPage() {
     return Array.from(set).sort();
   }, [books]);
 
+  // Tags sorted by book count descending
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    books.forEach((b) => b.tags?.forEach((t) => { counts[t] = (counts[t] ?? 0) + 1; }));
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [books]);
+
   const filteredBooks = useMemo(
     () => (activeTag ? books.filter((b) => b.tags?.includes(activeTag)) : books),
     [books, activeTag],
   );
+
+  const closeSidebarIfMobile = useCallback(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640) setSidebarOpen(false);
+  }, []);
 
   const handleSaveEdit = useCallback(
     async (bookId: string, newTitle: string, newTags: string[]) => {
@@ -61,92 +73,154 @@ export default function LibraryPage() {
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-serif font-bold text-gray-900">Lexis</h1>
-          <div className="flex items-center gap-4">
+      <div className="min-h-screen bg-gray-50 flex">
+
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-20 bg-black/30 sm:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+        <aside
+          className="fixed sm:relative top-0 left-0 bottom-0 z-30 sm:z-auto flex flex-col bg-white border-r border-gray-100 shrink-0 transition-all duration-200 overflow-hidden"
+          style={{ width: sidebarOpen ? '13rem' : 0 }}
+        >
+          <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 shrink-0" style={{ minWidth: '13rem' }}>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tags</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="text-gray-400 hover:text-gray-700 transition-colors leading-none"
+            >
+              ✕
+            </button>
+          </div>
+
+          <nav className="flex-1 overflow-y-auto p-3 space-y-0.5" style={{ minWidth: '13rem' }}>
+            <button
+              onClick={() => { setActiveTag(null); closeSidebarIfMobile(); }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                !activeTag ? 'bg-amber-50 text-amber-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <span>All books</span>
+              <span className="text-xs tabular-nums opacity-50">{books.length}</span>
+            </button>
+
+            {tagCounts.length === 0 ? (
+              <p className="px-3 py-6 text-xs text-gray-400 text-center">No tags yet</p>
+            ) : (
+              tagCounts.map(([tag, count]) => (
+                <button
+                  key={tag}
+                  onClick={() => { setActiveTag(activeTag === tag ? null : tag); closeSidebarIfMobile(); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                    activeTag === tag
+                      ? 'bg-amber-50 text-amber-700 font-medium'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <span className="truncate text-left">{tag}</span>
+                  <span className="text-xs tabular-nums opacity-50 shrink-0 ml-2">{count}</span>
+                </button>
+              ))
+            )}
+          </nav>
+        </aside>
+
+        {/* ── Main ─────────────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <header className="bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen((o) => !o)}
+              className="shrink-0 flex flex-col gap-[4px] justify-center text-gray-500 hover:text-gray-900 transition-colors"
+              aria-label="Toggle tag sidebar"
+            >
+              <span className="block w-5 h-[1.5px] bg-current rounded-full transition-all" />
+              <span className="block w-5 h-[1.5px] bg-current rounded-full transition-all" />
+              <span
+                className="block h-[1.5px] bg-current rounded-full transition-all"
+                style={{ width: sidebarOpen ? '1.25rem' : '0.875rem' }}
+              />
+            </button>
+            <h1 className="text-xl font-serif font-bold text-gray-900 flex-1">Lexis</h1>
             <span className="text-xs text-gray-400 hidden sm:block">{user?.email}</span>
             <button onClick={signOut} className="text-xs text-gray-500 hover:text-gray-900 transition-colors">
               Sign out
             </button>
-          </div>
-        </header>
+          </header>
 
-        <main className="max-w-5xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-base font-semibold text-gray-900">My Library</h2>
-            <Link
-              href="/upload"
-              className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              + Upload book
-            </Link>
-          </div>
-
-          {/* Tag filter bar */}
-          {allTags.length > 0 && (
-            <div className="flex items-center gap-2 mb-6 flex-wrap">
-              <button
-                onClick={() => setActiveTag(null)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  !activeTag
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                All
-              </button>
-              {allTags.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    activeTag === tag
-                      ? 'bg-amber-500 text-white'
-                      : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-400'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex justify-center py-20">
-              <div className="w-6 h-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
-            </div>
-          ) : filteredBooks.length === 0 && books.length === 0 ? (
-            <div className="text-center py-24">
-              <div className="text-5xl mb-4">📚</div>
-              <p className="text-gray-500 font-medium">Your library is empty</p>
-              <p className="text-sm text-gray-400 mt-1 mb-6">Upload a PDF to start reading</p>
+          <main className="max-w-5xl mx-auto w-full px-6 py-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                {activeTag ? (
+                  <>
+                    <span className="text-gray-400 font-normal text-sm">Tagged</span>
+                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-700 rounded-full text-sm">{activeTag}</span>
+                    <button
+                      onClick={() => setActiveTag(null)}
+                      className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Clear filter"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  'My Library'
+                )}
+              </h2>
               <Link
                 href="/upload"
-                className="inline-block px-5 py-2.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
               >
-                Upload your first book
+                + Upload book
               </Link>
             </div>
-          ) : filteredBooks.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-sm">
-              No books tagged &ldquo;{activeTag}&rdquo;
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-5">
-              {filteredBooks.map((book) => (
-                <BookCard
-                  key={book.id}
-                  book={book}
-                  progress={progress[book.id]}
-                  onEdit={() => setEditingBook(book)}
-                  onDelete={() => handleDelete(book.id)}
-                  onTagClick={(tag) => setActiveTag(tag)}
-                />
-              ))}
-            </div>
-          )}
-        </main>
+
+            {loading ? (
+              <div className="flex justify-center py-20">
+                <div className="w-6 h-6 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+              </div>
+            ) : filteredBooks.length === 0 && books.length === 0 ? (
+              <div className="text-center py-24">
+                <div className="text-5xl mb-4">📚</div>
+                <p className="text-gray-500 font-medium">Your library is empty</p>
+                <p className="text-sm text-gray-400 mt-1 mb-6">Upload a PDF or EPUB to start reading</p>
+                <Link
+                  href="/upload"
+                  className="inline-block px-5 py-2.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  Upload your first book
+                </Link>
+              </div>
+            ) : filteredBooks.length === 0 ? (
+              <div className="text-center py-16">
+                <p className="text-gray-400 text-sm mb-2">No books tagged &ldquo;{activeTag}&rdquo;</p>
+                <button
+                  onClick={() => setActiveTag(null)}
+                  className="text-sm text-amber-600 hover:text-amber-700 transition-colors"
+                >
+                  Show all books
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-5">
+                {filteredBooks.map((book) => (
+                  <BookCard
+                    key={book.id}
+                    book={book}
+                    progress={progress[book.id]}
+                    onEdit={() => setEditingBook(book)}
+                    onDelete={() => handleDelete(book.id)}
+                    onTagClick={(tag) => setActiveTag(tag)}
+                  />
+                ))}
+              </div>
+            )}
+          </main>
+        </div>
       </div>
 
       {editingBook && (
@@ -186,7 +260,6 @@ function BookCard({
     ? new Date(progress.lastReadAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     : null;
 
-  // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -202,12 +275,11 @@ function BookCard({
   const handleDelete = async () => {
     setDeleting(true);
     await onDelete();
-    // component unmounts after this, no need to reset state
   };
 
   return (
     <div className="relative">
-      {/* ⋮ menu button — always visible */}
+      {/* ⋮ menu button */}
       <div ref={menuRef} className="absolute top-1.5 right-1.5 z-10">
         <button
           onClick={(e) => { e.preventDefault(); setMenuOpen((o) => !o); setConfirming(false); }}
@@ -327,6 +399,8 @@ function BookEditModal({
   const [tags, setTags] = useState<string[]>(book.tags ?? []);
   const [saving, setSaving] = useState(false);
 
+  const quickAddTags = allTags.filter((t) => !tags.includes(t));
+
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
@@ -359,6 +433,23 @@ function BookEditModal({
 
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Tags</label>
+
+          {/* Quick-select existing tags */}
+          {quickAddTags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {quickAddTags.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTags((prev) => [...prev, t])}
+                  className="px-2.5 py-1 text-xs rounded-full border border-dashed border-gray-300 text-gray-500 hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                >
+                  + {t}
+                </button>
+              ))}
+            </div>
+          )}
+
           <TagInput value={tags} onChange={setTags} suggestions={allTags} />
         </div>
 
