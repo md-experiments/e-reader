@@ -188,8 +188,23 @@ export default function Reader({ bookId }: { bookId: string }) {
     }
   }, [loading, bookId, currentPage]);
 
-  // On page navigation: restore the saved scroll position for that page
-  // (same logic as the initial-load restore, but runs on every page change).
+  // On page navigation: save the scroll position of the page being left, then
+  // restore the saved position for the new page. The cleanup runs synchronously
+  // before the new effect, while main.scrollTop still reflects the old page —
+  // this is more reliable than the debounced handleScroll save, which can fire
+  // with a stale currentPageRef if the user navigates quickly.
+  useEffect(() => {
+    if (!scrollRestoredRef.current) return;
+
+    // Cleanup: capture position of the page we're leaving.
+    return () => {
+      const top = mainRef.current?.scrollTop ?? 0;
+      try { localStorage.setItem(`lexis-scroll-${bookId}-${currentPage}`, String(top)); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, bookId]);  // currentPage/bookId captured in closure for the save
+
+  // Restore the saved position after the above cleanup has run.
   useEffect(() => {
     if (!scrollRestoredRef.current) return;
     scrollSavingEnabled.current = false;
@@ -504,10 +519,7 @@ export default function Reader({ bookId }: { bookId: string }) {
         <Link
           href="/library"
           className="text-sm transition-opacity opacity-50 hover:opacity-100"
-          onClick={(e) => {
-            e.stopPropagation();
-            try { localStorage.setItem('lexis-last-book', ''); } catch {}
-          }}
+          onClick={(e) => { e.stopPropagation(); }}
         >
           ← Library
         </Link>
