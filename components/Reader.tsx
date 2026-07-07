@@ -23,6 +23,9 @@ import PdfViewer from '@/components/PdfViewer';
 import EpubViewer from '@/components/EpubViewer';
 import TocSidebar from '@/components/TocSidebar';
 import HighlightsPanel from '@/components/HighlightsPanel';
+import TtsPanel from '@/components/TtsPanel';
+import { useTts, type TtsEngine } from '@/hooks/useTts';
+import { splitIntoSentences, applyTtsHighlight, clearTtsHighlight, scrollRangeIntoView } from '@/lib/tts';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
 // ── Themes ────────────────────────────────────────────────────────────────────
@@ -144,6 +147,13 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [theme, setTheme] = useState<Theme>(() => loadSetting('theme', 'light'));
   const [fontFamily, setFontFamily] = useState<FontFamily>(() => loadSetting('fontFamily', 'georgia'));
 
+  // Text-to-speech
+  const [showTts, setShowTts] = useState(false);
+  const [ttsEngine, setTtsEngine] = useState<TtsEngine>(() => loadSetting('ttsEngine', 'webspeech'));
+  const [ttsRate, setTtsRate] = useState<number>(() => loadSetting('ttsRate', 1));
+  const [ttsWebVoice, setTtsWebVoice] = useState<string | null>(() => loadSetting('ttsWebVoice', null));
+  const [ttsKokoroVoice, setTtsKokoroVoice] = useState<string>(() => loadSetting('ttsKokoroVoice', 'af_heart'));
+
   const contentRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const touchStartX = useRef(0);
@@ -165,6 +175,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => { saveSettings({ fontSize }); }, [fontSize]);
   useEffect(() => { saveSettings({ theme }); }, [theme]);
   useEffect(() => { saveSettings({ fontFamily }); }, [fontFamily]);
+  useEffect(() => { saveSettings({ ttsEngine }); }, [ttsEngine]);
+  useEffect(() => { saveSettings({ ttsRate }); }, [ttsRate]);
+  useEffect(() => { saveSettings({ ttsWebVoice }); }, [ttsWebVoice]);
+  useEffect(() => { saveSettings({ ttsKokoroVoice }); }, [ttsKokoroVoice]);
 
   // Remember this as the last opened book
   useEffect(() => {
@@ -492,6 +506,54 @@ export default function Reader({ bookId }: { bookId: string }) {
     return renderHighlights(data?.text ?? '', highlights, data?.segments);
   }, [pages, currentPage, highlights]);
 
+  // ── Text-to-speech ──────────────────────────────────────────────────────────
+
+  const ttsSentences = useMemo(
+    () => splitIntoSentences(pages[currentPage - 1]?.text ?? ''),
+    [pages, currentPage],
+  );
+
+  // When the page finishes, advance and keep reading; on the last page, stop.
+  const handleTtsPageComplete = useCallback(() => {
+    const pageCount = book?.pageCount ?? 1;
+    if (currentPageRef.current < pageCount) {
+      setCurrentPage((p) => Math.min(pageCount, p + 1));
+      return true;
+    }
+    return false;
+  }, [book]);
+
+  const tts = useTts({
+    sentences: ttsSentences,
+    engine: ttsEngine,
+    rate: ttsRate,
+    webVoiceURI: ttsWebVoice,
+    kokoroVoice: ttsKokoroVoice,
+    onPageComplete: handleTtsPageComplete,
+  });
+
+  const handleTtsEngineChange = useCallback(
+    (engine: TtsEngine) => {
+      setTtsEngine(engine);
+      if (engine === 'kokoro') tts.preloadKokoro();
+    },
+    [tts.preloadKokoro], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Highlight + follow the sentence being spoken. Uses the CSS Custom Highlight
+  // API, so the memoised page DOM is never mutated (see PageContent note above).
+  const ttsActiveSentence = tts.activeIndex !== null ? ttsSentences[tts.activeIndex] ?? null : null;
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!ttsActiveSentence || !root || viewMode !== 'reader') {
+      clearTtsHighlight();
+      return;
+    }
+    const range = applyTtsHighlight(root, ttsActiveSentence.start, ttsActiveSentence.end);
+    if (range) scrollRangeIntoView(mainRef.current, range);
+    return clearTtsHighlight;
+  }, [ttsActiveSentence, contentHtml, viewMode]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: t.bg }}>
@@ -529,12 +591,33 @@ export default function Reader({ bookId }: { bookId: string }) {
         <div className="flex items-center gap-2">
           {viewMode === 'reader' && (
             <button
-              onClick={(e) => { e.stopPropagation(); setShowSettings((s) => !s); }}
+              onClick={(e) => { e.stopPropagation(); setShowSettings((s) => !s); setShowTts(false); }}
               className="text-sm px-2 py-1 rounded opacity-50 hover:opacity-100 transition-opacity"
             >
               Aa
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowTts((s) => !s);
+              setShowSettings(false);
+            }}
+            className="text-xs px-2.5 py-1 rounded border transition-colors"
+            style={{
+              borderColor: t.border,
+              color: tts.status === 'playing' ? '#ffffff' : t.fg,
+              backgroundColor: tts.status === 'playing' ? '#d97706' : showTts ? t.hover : 'transparent',
+              opacity: showTts || tts.status !== 'stopped' ? 1 : 0.55,
+            }}
+            title="Listen"
+            aria-label="Listen"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" className="inline-block align-[-2px]" aria-hidden="true">
+              <path d="M8 2.2 4.6 5H2.5c-.6 0-1 .4-1 1v4c0 .6.4 1 1 1h2.1L8 13.8c.5.4 1.2 0 1.2-.6V2.8c0-.6-.7-1-1.2-.6z" />
+              <path d="M11.3 5.4a.6.6 0 0 1 .85 0 3.7 3.7 0 0 1 0 5.2.6.6 0 0 1-.85-.85 2.5 2.5 0 0 0 0-3.5.6.6 0 0 1 0-.85z" />
+            </svg>
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -601,6 +684,28 @@ export default function Reader({ bookId }: { bookId: string }) {
           </button>
         </div>
       </header>
+
+      {/* TTS panel */}
+      {showTts && (
+        <TtsPanel
+          t={t}
+          status={tts.status}
+          busy={tts.busy}
+          supported={tts.supported}
+          voices={tts.voices}
+          kokoroLoad={tts.kokoroLoad}
+          engine={ttsEngine}
+          rate={ttsRate}
+          webVoiceURI={ttsWebVoice}
+          kokoroVoice={ttsKokoroVoice}
+          onPlayPause={() => (tts.status === 'playing' ? tts.pause() : tts.play())}
+          onStop={tts.stop}
+          onEngineChange={handleTtsEngineChange}
+          onRateChange={setTtsRate}
+          onWebVoiceChange={setTtsWebVoice}
+          onKokoroVoiceChange={setTtsKokoroVoice}
+        />
+      )}
 
       {/* Settings panel */}
       {showSettings && (
