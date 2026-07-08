@@ -89,12 +89,17 @@ interface UseTtsArgs {
   rate: number;
   webVoiceURI: string | null;
   kokoroVoice: string;
+  /** BCP-47 language of the content being read (e.g. 'bg' for a translation).
+   *  When set, the device engine prefers a voice matching this language over
+   *  the user's saved voice, so translated text isn't read with an
+   *  English voice. Undefined = no preference (use the saved voice). */
+  lang?: string;
   /** Called when the last sentence of the page finishes. Return true if the
    *  reader is advancing to another page (playback then auto-continues). */
   onPageComplete: () => boolean;
 }
 
-export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPageComplete }: UseTtsArgs) {
+export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang, onPageComplete }: UseTtsArgs) {
   const [status, setStatus] = useState<TtsStatus>('stopped');
   const [busy, setBusy] = useState(false); // waiting on model load / generation
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -124,6 +129,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPa
   const rateRef = useRef(rate);
   const webVoiceRef = useRef(webVoiceURI);
   const kokoroVoiceRef = useRef(kokoroVoice);
+  const langRef = useRef(lang);
   const voicesRef = useRef(voices);
   const onPageCompleteRef = useRef(onPageComplete);
   useEffect(() => {
@@ -132,6 +138,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPa
     rateRef.current = rate;
     webVoiceRef.current = webVoiceURI;
     kokoroVoiceRef.current = kokoroVoice;
+    langRef.current = lang;
     voicesRef.current = voices;
     onPageCompleteRef.current = onPageComplete;
   });
@@ -153,8 +160,8 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPa
   // System voices (Chrome populates them asynchronously)
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      setSupported(false);
-      return;
+      const id = setTimeout(() => setSupported(false), 0);
+      return () => clearTimeout(id);
     }
     const update = () => setVoices(window.speechSynthesis.getVoices());
     update();
@@ -242,10 +249,23 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPa
       if (engineRef.current === 'webspeech') {
         const u = new SpeechSynthesisUtterance(list[idx].text);
         u.rate = rateRef.current;
-        const voice = voicesRef.current.find((v) => v.voiceURI === webVoiceRef.current);
+        const contentLang = langRef.current?.toLowerCase();
+        let voice = voicesRef.current.find((v) => v.voiceURI === webVoiceRef.current);
+        if (contentLang) {
+          // Content language wins over the saved voice: drop a mismatched
+          // saved voice and pick one that can actually speak this language.
+          if (voice && !voice.lang.toLowerCase().startsWith(contentLang)) voice = undefined;
+          if (!voice) {
+            const matches = voicesRef.current.filter((v) => v.lang.toLowerCase().startsWith(contentLang));
+            voice = matches.find((v) => v.default) ?? matches[0];
+          }
+        }
         if (voice) {
           u.voice = voice;
           u.lang = voice.lang;
+        } else if (contentLang) {
+          // No matching installed voice — let the engine resolve the language
+          u.lang = contentLang;
         }
         u.onend = () => {
           if (session === sessionRef.current) speakSentenceRef.current(idx + 1, session);
@@ -380,12 +400,12 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, onPa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rate]);
 
-  // Voice change: regenerate / restart the current sentence
+  // Voice or content-language change: regenerate / restart the current sentence
   useEffect(() => {
     if (engineRef.current === 'kokoro') clearAudioCache();
     if (statusRef.current === 'playing') play(indexRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [webVoiceURI, kokoroVoice]);
+  }, [webVoiceURI, kokoroVoice, lang]);
 
   // Engine change: keep position, restart with the new engine if playing
   useEffect(() => {
