@@ -63,18 +63,23 @@ export default function TtsPanel({
     color: t.fg,
   };
 
-  // Voices for the language being read first (falling back to English), since
-  // most system voice lists are long and unsorted
-  const preferredLang = (contentLang ?? 'en').toLowerCase();
-  const rank = (v: SpeechSynthesisVoice) => {
-    const l = v.lang.toLowerCase();
-    if (l.startsWith(preferredLang)) return 0;
-    if (l.startsWith('en')) return 1;
-    return 2;
-  };
-  const sortedVoices = [...voices].sort(
-    (a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name),
-  );
+  // While reading translated content, only voices that can speak that language
+  // are offered (the engine auto-picks one when "Automatic" is selected).
+  // Otherwise show everything, English first, since most system voice lists
+  // are long and unsorted.
+  const lang = contentLang?.toLowerCase();
+  const rank = (v: SpeechSynthesisVoice) => (v.lang.toLowerCase().startsWith('en') ? 0 : 1);
+  const sortedVoices = (lang ? voices.filter((v) => v.lang.toLowerCase().startsWith(lang)) : [...voices])
+    .sort((a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+
+  let langName: string | undefined;
+  if (lang) {
+    try {
+      langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(lang);
+    } catch {
+      langName = lang;
+    }
+  }
 
   return (
     <div
@@ -165,7 +170,7 @@ export default function TtsPanel({
             aria-label="Voice"
           >
             <option value="" style={{ backgroundColor: t.bg }}>
-              System default
+              {langName ? `Automatic (${langName})` : 'System default'}
             </option>
             {sortedVoices.map((v) => (
               <option key={v.voiceURI} value={v.voiceURI} style={{ backgroundColor: t.bg }}>

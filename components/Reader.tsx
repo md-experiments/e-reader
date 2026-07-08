@@ -152,6 +152,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [ttsEngine, setTtsEngine] = useState<TtsEngine>(() => loadSetting('ttsEngine', 'webspeech'));
   const [ttsRate, setTtsRate] = useState<number>(() => loadSetting('ttsRate', 1));
   const [ttsWebVoice, setTtsWebVoice] = useState<string | null>(() => loadSetting('ttsWebVoice', null));
+  // Separate voice slot for the Bulgarian translation view, so switching views
+  // never clobbers the reading voice and needs no manual re-selection.
+  const [ttsWebVoiceBg, setTtsWebVoiceBg] = useState<string | null>(() => loadSetting('ttsWebVoiceBg', null));
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<string>(() => loadSetting('ttsKokoroVoice', 'af_heart'));
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -179,6 +182,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => { saveSettings({ ttsEngine }); }, [ttsEngine]);
   useEffect(() => { saveSettings({ ttsRate }); }, [ttsRate]);
   useEffect(() => { saveSettings({ ttsWebVoice }); }, [ttsWebVoice]);
+  useEffect(() => { saveSettings({ ttsWebVoiceBg }); }, [ttsWebVoiceBg]);
   useEffect(() => { saveSettings({ ttsKokoroVoice }); }, [ttsKokoroVoice]);
 
   // Remember this as the last opened book
@@ -541,7 +545,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     sentences: ttsSentences,
     engine: ttsEffectiveEngine,
     rate: ttsRate,
-    webVoiceURI: ttsWebVoice,
+    webVoiceURI: readingTranslation ? ttsWebVoiceBg : ttsWebVoice,
     kokoroVoice: ttsKokoroVoice,
     lang: ttsContentLang,
     onPageComplete: handleTtsPageComplete,
@@ -718,13 +722,13 @@ export default function Reader({ bookId }: { bookId: string }) {
           engine={ttsEngine}
           contentLang={ttsContentLang}
           rate={ttsRate}
-          webVoiceURI={ttsWebVoice}
+          webVoiceURI={readingTranslation ? ttsWebVoiceBg : ttsWebVoice}
           kokoroVoice={ttsKokoroVoice}
           onPlayPause={() => (tts.status === 'playing' ? tts.pause() : tts.play())}
           onStop={tts.stop}
           onEngineChange={handleTtsEngineChange}
           onRateChange={setTtsRate}
-          onWebVoiceChange={setTtsWebVoice}
+          onWebVoiceChange={readingTranslation ? setTtsWebVoiceBg : setTtsWebVoice}
           onKokoroVoiceChange={setTtsKokoroVoice}
         />
       )}
