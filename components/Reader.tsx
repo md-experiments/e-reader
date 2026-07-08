@@ -714,6 +714,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           supported={tts.supported}
           voices={tts.voices}
           kokoroLoad={tts.kokoroLoad}
+          kokoroBackend={tts.kokoroBackend}
           engine={ttsEngine}
           contentLang={ttsContentLang}
           rate={ttsRate}

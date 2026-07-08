@@ -1,6 +1,6 @@
 'use client';
 
-import type { TtsEngine, TtsStatus, KokoroLoadState } from '@/hooks/useTts';
+import type { TtsEngine, TtsStatus, KokoroLoadState, KokoroBackend } from '@/hooks/useTts';
 import { KOKORO_VOICES } from '@/hooks/useTts';
 
 interface ThemeLike {
@@ -18,6 +18,8 @@ interface TtsPanelProps {
   supported: boolean;
   voices: SpeechSynthesisVoice[];
   kokoroLoad: KokoroLoadState;
+  /** Backend Kokoro will use on this device (null while still detecting). */
+  kokoroBackend: KokoroBackend | null;
   engine: TtsEngine;
   /** Language of the content being read when it isn't the book's own text
    *  (e.g. 'bg' while the Bulgarian translation is shown). */
@@ -42,6 +44,7 @@ export default function TtsPanel({
   supported,
   voices,
   kokoroLoad,
+  kokoroBackend,
   engine,
   contentLang,
   rate,
@@ -145,7 +148,10 @@ export default function TtsPanel({
             Device voice
           </option>
           <option value="kokoro" style={{ backgroundColor: t.bg }}>
-            Enhanced{kokoroLoad.state === 'ready' ? '' : ' (~120 MB download)'}
+            Enhanced
+            {kokoroLoad.state === 'ready'
+              ? ''
+              : ` (~${kokoroBackend === 'webgpu' ? '350' : '120'} MB download)`}
           </option>
         </select>
 
@@ -213,7 +219,9 @@ export default function TtsPanel({
 
       {engine === 'kokoro' && kokoroLoad.state === 'idle' && (
         <p className="text-xs" style={{ color: t.fg, opacity: 0.5 }}>
-          The enhanced voice runs entirely on your device. One-time download, cached for offline use.
+          The enhanced voice runs entirely on your device
+          {kokoroBackend === 'webgpu' ? ', accelerated by your GPU' : ''}. One-time download,
+          cached for offline use.
         </p>
       )}
 
