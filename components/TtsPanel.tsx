@@ -19,6 +19,9 @@ interface TtsPanelProps {
   voices: SpeechSynthesisVoice[];
   kokoroLoad: KokoroLoadState;
   engine: TtsEngine;
+  /** Language of the content being read when it isn't the book's own text
+   *  (e.g. 'bg' while the Bulgarian translation is shown). */
+  contentLang?: string;
   rate: number;
   webVoiceURI: string | null;
   kokoroVoice: string;
@@ -40,6 +43,7 @@ export default function TtsPanel({
   voices,
   kokoroLoad,
   engine,
+  contentLang,
   rate,
   webVoiceURI,
   kokoroVoice,
@@ -56,12 +60,18 @@ export default function TtsPanel({
     color: t.fg,
   };
 
-  // English voices first — most system voice lists are long and unsorted
-  const sortedVoices = [...voices].sort((a, b) => {
-    const aEn = a.lang.startsWith('en') ? 0 : 1;
-    const bEn = b.lang.startsWith('en') ? 0 : 1;
-    return aEn - bEn || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
-  });
+  // Voices for the language being read first (falling back to English), since
+  // most system voice lists are long and unsorted
+  const preferredLang = (contentLang ?? 'en').toLowerCase();
+  const rank = (v: SpeechSynthesisVoice) => {
+    const l = v.lang.toLowerCase();
+    if (l.startsWith(preferredLang)) return 0;
+    if (l.startsWith('en')) return 1;
+    return 2;
+  };
+  const sortedVoices = [...voices].sort(
+    (a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name),
+  );
 
   return (
     <div
@@ -173,6 +183,13 @@ export default function TtsPanel({
           </select>
         )}
       </div>
+
+      {engine === 'kokoro' && contentLang && (
+        <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>
+          The enhanced voice is English-only, so the device voice is used while reading the
+          translation.
+        </p>
+      )}
 
       {engine === 'webspeech' && !supported && (
         <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>

@@ -155,6 +155,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<string>(() => loadSetting('ttsKokoroVoice', 'af_heart'));
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const translationRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -508,27 +509,41 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   // ── Text-to-speech ──────────────────────────────────────────────────────────
 
-  const ttsSentences = useMemo(
-    () => splitIntoSentences(pages[currentPage - 1]?.text ?? ''),
-    [pages, currentPage],
-  );
+  // Read what's on screen: the Bulgarian translation when it's displayed,
+  // otherwise the page text. While a translation is still loading there's
+  // nothing to read yet (play is a no-op on empty sentences).
+  const readingTranslation = viewMode === 'translation';
+  const ttsSentences = useMemo(() => {
+    if (readingTranslation) {
+      return translatedText ? splitIntoSentences(translatedText) : [];
+    }
+    return splitIntoSentences(pages[currentPage - 1]?.text ?? '');
+  }, [readingTranslation, translatedText, pages, currentPage]);
+
+  const ttsContentLang = readingTranslation ? 'bg' : undefined;
+  // Kokoro is English-only — translations always go through the device voice.
+  const ttsEffectiveEngine: TtsEngine = readingTranslation ? 'webspeech' : ttsEngine;
 
   // When the page finishes, advance and keep reading; on the last page, stop.
+  // Translations are per-page and fetched on demand, so stop there instead of
+  // advancing into untranslated English mid-listen.
   const handleTtsPageComplete = useCallback(() => {
+    if (viewMode === 'translation') return false;
     const pageCount = book?.pageCount ?? 1;
     if (currentPageRef.current < pageCount) {
       setCurrentPage((p) => Math.min(pageCount, p + 1));
       return true;
     }
     return false;
-  }, [book]);
+  }, [book, viewMode]);
 
   const tts = useTts({
     sentences: ttsSentences,
-    engine: ttsEngine,
+    engine: ttsEffectiveEngine,
     rate: ttsRate,
     webVoiceURI: ttsWebVoice,
     kokoroVoice: ttsKokoroVoice,
+    lang: ttsContentLang,
     onPageComplete: handleTtsPageComplete,
   });
 
@@ -542,17 +557,22 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   // Highlight + follow the sentence being spoken. Uses the CSS Custom Highlight
   // API, so the memoised page DOM is never mutated (see PageContent note above).
+  // In translation view the offsets index into the raw translated string, which
+  // is rendered verbatim in a single text node, so the same walker applies.
   const ttsActiveSentence = tts.activeIndex !== null ? ttsSentences[tts.activeIndex] ?? null : null;
   useEffect(() => {
-    const root = contentRef.current;
-    if (!ttsActiveSentence || !root || viewMode !== 'reader') {
+    const root =
+      viewMode === 'reader' ? contentRef.current :
+      viewMode === 'translation' ? translationRef.current :
+      null;
+    if (!ttsActiveSentence || !root) {
       clearTtsHighlight();
       return;
     }
     const range = applyTtsHighlight(root, ttsActiveSentence.start, ttsActiveSentence.end);
     if (range) scrollRangeIntoView(mainRef.current, range);
     return clearTtsHighlight;
-  }, [ttsActiveSentence, contentHtml, viewMode]);
+  }, [ttsActiveSentence, contentHtml, viewMode, translatedText, translationLoading]);
 
   if (loading) {
     return (
@@ -695,6 +715,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           voices={tts.voices}
           kokoroLoad={tts.kokoroLoad}
           engine={ttsEngine}
+          contentLang={ttsContentLang}
           rate={ttsRate}
           webVoiceURI={ttsWebVoice}
           kokoroVoice={ttsKokoroVoice}
@@ -828,6 +849,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               </div>
             ) : (
               <div
+                ref={translationRef}
                 className="select-text whitespace-pre-wrap"
                 style={{
                   fontSize: `${fontSize}px`,
