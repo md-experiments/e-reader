@@ -24,7 +24,7 @@ import EpubViewer from '@/components/EpubViewer';
 import TocSidebar from '@/components/TocSidebar';
 import HighlightsPanel from '@/components/HighlightsPanel';
 import TtsPanel from '@/components/TtsPanel';
-import { useTts, type TtsEngine } from '@/hooks/useTts';
+import { useTts, type TtsEngine, type TtsStatus } from '@/hooks/useTts';
 import { splitIntoSentences, applyTtsHighlight, clearTtsHighlight, scrollRangeIntoView } from '@/lib/tts';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
@@ -136,6 +136,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [viewMode, setViewMode] = useState<'reader' | 'pdf' | 'translation'>('reader');
   const [showToc, setShowToc] = useState(false);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
+  // Which page translatedText belongs to — guards TTS against briefly reading
+  // the previous page's translation during the page-change commit.
+  const [translatedPage, setTranslatedPage] = useState<number | null>(null);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [showHighlightsPanel, setShowHighlightsPanel] = useState(false);
   const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
@@ -160,6 +163,13 @@ export default function Reader({ bookId }: { bookId: string }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const translationRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
+  // Mirrors of TTS hook values for effects declared above the hook call.
+  // Updated in effects after the hook, so during a page-change commit they
+  // hold the previous commit's values — which is exactly what "was the user
+  // listening when the page turned" needs.
+  const ttsStatusRef = useRef<TtsStatus>('stopped');
+  const ttsStopRef = useRef<() => void>(() => {});
+  const fetchTranslationRef = useRef<(page: number) => void>(() => {});
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -263,11 +273,19 @@ export default function Reader({ bookId }: { bookId: string }) {
     getHighlightsForPage(user.uid, bookId, currentPage).then(setHighlights);
   }, [user, bookId, currentPage]);
 
-  // Reset translation state when navigating pages
+  // Reset translation state when navigating pages. If the user was listening
+  // in the translation view, stay there and fetch the new page's translation —
+  // TTS holds in its playing state and resumes once the text arrives.
   useEffect(() => {
     setTranslatedText(null);
     setTranslationLoading(false);
-    if (viewMode === 'translation') setViewMode('reader');
+    if (viewMode === 'translation') {
+      if (ttsStatusRef.current === 'playing') {
+        fetchTranslationRef.current(currentPage);
+      } else {
+        setViewMode('reader');
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
 
@@ -450,26 +468,24 @@ export default function Reader({ bookId }: { bookId: string }) {
     [user, bookId, book],
   );
 
-  const handleTranslate = useCallback(async () => {
-    if (!user || !isAdmin) return;
-    if (viewMode === 'translation') {
-      setViewMode('reader');
-      return;
-    }
-    setViewMode('translation');
-    if (translatedText !== null) return; // already cached in state
-
+  // Fetch (or load cached) translation for a page. All state writes are
+  // guarded on still being on that page, since auto-continued listening can
+  // outrun a slow response.
+  const fetchTranslation = useCallback(async (page: number) => {
+    if (!user) return;
     setTranslationLoading(true);
     try {
-      const cached = await getTranslation(user.uid, bookId, currentPage);
+      const cached = await getTranslation(user.uid, bookId, page);
       if (cached) {
-        setTranslatedText(cached);
-        setTranslationLoading(false);
+        if (currentPageRef.current === page) {
+          setTranslatedText(cached);
+          setTranslatedPage(page);
+        }
         return;
       }
 
-      const pageText = pages[currentPage - 1]?.text ?? '';
-      const prevPageText = currentPage > 1 ? (pages[currentPage - 2]?.text ?? '') : '';
+      const pageText = pages[page - 1]?.text ?? '';
+      const prevPageText = page > 1 ? (pages[page - 2]?.text ?? '') : '';
       const idToken = await user.getIdToken();
       const res = await fetch('/api/translate', {
         method: 'POST',
@@ -478,14 +494,34 @@ export default function Reader({ bookId }: { bookId: string }) {
       });
       if (!res.ok) throw new Error('Translation request failed');
       const { translatedText: text } = await res.json() as { translatedText: string };
-      setTranslatedText(text);
-      await saveTranslation(user.uid, bookId, currentPage, text);
+      if (currentPageRef.current === page) {
+        setTranslatedText(text);
+        setTranslatedPage(page);
+      }
+      await saveTranslation(user.uid, bookId, page, text);
     } catch {
-      setTranslatedText('Translation failed. Please try again.');
+      if (currentPageRef.current === page) {
+        setTranslatedText('Translation failed. Please try again.');
+        // Don't leave TTS waiting for (or reading) the failure message
+        ttsStopRef.current();
+      }
     } finally {
-      setTranslationLoading(false);
+      if (currentPageRef.current === page) setTranslationLoading(false);
     }
-  }, [user, isAdmin, viewMode, translatedText, bookId, currentPage, pages]);
+  }, [user, bookId, pages]);
+
+  useEffect(() => { fetchTranslationRef.current = fetchTranslation; }, [fetchTranslation]);
+
+  const handleTranslate = useCallback(async () => {
+    if (!user || !isAdmin) return;
+    if (viewMode === 'translation') {
+      setViewMode('reader');
+      return;
+    }
+    setViewMode('translation');
+    if (translatedText !== null) return; // already cached in state
+    await fetchTranslation(currentPage);
+  }, [user, isAdmin, viewMode, translatedText, currentPage, fetchTranslation]);
 
   const goToPrev = useCallback(() => setCurrentPage((p) => Math.max(1, p - 1)), []);
   const goToNext = useCallback(
@@ -519,27 +555,28 @@ export default function Reader({ bookId }: { bookId: string }) {
   const readingTranslation = viewMode === 'translation';
   const ttsSentences = useMemo(() => {
     if (readingTranslation) {
-      return translatedText ? splitIntoSentences(translatedText) : [];
+      return translatedText && translatedPage === currentPage
+        ? splitIntoSentences(translatedText)
+        : [];
     }
     return splitIntoSentences(pages[currentPage - 1]?.text ?? '');
-  }, [readingTranslation, translatedText, pages, currentPage]);
+  }, [readingTranslation, translatedText, translatedPage, pages, currentPage]);
 
   const ttsContentLang = readingTranslation ? 'bg' : undefined;
   // Kokoro is English-only — translations always go through the device voice.
   const ttsEffectiveEngine: TtsEngine = readingTranslation ? 'webspeech' : ttsEngine;
 
   // When the page finishes, advance and keep reading; on the last page, stop.
-  // Translations are per-page and fetched on demand, so stop there instead of
-  // advancing into untranslated English mid-listen.
+  // In translation view the page-change effect fetches the next page's
+  // translation and TTS resumes once it arrives.
   const handleTtsPageComplete = useCallback(() => {
-    if (viewMode === 'translation') return false;
     const pageCount = book?.pageCount ?? 1;
     if (currentPageRef.current < pageCount) {
       setCurrentPage((p) => Math.min(pageCount, p + 1));
       return true;
     }
     return false;
-  }, [book, viewMode]);
+  }, [book]);
 
   const tts = useTts({
     sentences: ttsSentences,
@@ -549,6 +586,11 @@ export default function Reader({ bookId }: { bookId: string }) {
     kokoroVoice: ttsKokoroVoice,
     lang: ttsContentLang,
     onPageComplete: handleTtsPageComplete,
+  });
+
+  useEffect(() => {
+    ttsStatusRef.current = tts.status;
+    ttsStopRef.current = tts.stop;
   });
 
   const handleTtsEngineChange = useCallback(

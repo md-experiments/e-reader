@@ -405,6 +405,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
       } else {
         audioRef.current?.pause();
       }
+      setBusy(false); // clear a waiting-for-content hold
       setStatusBoth('playing');
       speakSentence(fromIndex ?? indexRef.current, session);
     },
@@ -454,6 +455,12 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
     setBusy(false);
     if (wasPlaying && sentences.length > 0) {
       play(0);
+    } else if (wasPlaying) {
+      // The new page has no readable text *yet* (e.g. its translation is
+      // still being fetched). Hold the playing state — this effect fires
+      // again with the real sentences and playback resumes; a fetch failure
+      // or the user stopping ends the wait.
+      setBusy(true);
     } else {
       setStatusBoth('stopped');
     }
