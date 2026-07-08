@@ -1,6 +1,6 @@
 'use client';
 
-import type { TtsEngine, TtsStatus, KokoroLoadState } from '@/hooks/useTts';
+import type { TtsEngine, TtsStatus, KokoroLoadState, KokoroBackend } from '@/hooks/useTts';
 import { KOKORO_VOICES } from '@/hooks/useTts';
 
 interface ThemeLike {
@@ -18,6 +18,8 @@ interface TtsPanelProps {
   supported: boolean;
   voices: SpeechSynthesisVoice[];
   kokoroLoad: KokoroLoadState;
+  /** Backend Kokoro will use on this device (null while still detecting). */
+  kokoroBackend: KokoroBackend | null;
   engine: TtsEngine;
   /** Language of the content being read when it isn't the book's own text
    *  (e.g. 'bg' while the Bulgarian translation is shown). */
@@ -42,6 +44,7 @@ export default function TtsPanel({
   supported,
   voices,
   kokoroLoad,
+  kokoroBackend,
   engine,
   contentLang,
   rate,
@@ -60,18 +63,23 @@ export default function TtsPanel({
     color: t.fg,
   };
 
-  // Voices for the language being read first (falling back to English), since
-  // most system voice lists are long and unsorted
-  const preferredLang = (contentLang ?? 'en').toLowerCase();
-  const rank = (v: SpeechSynthesisVoice) => {
-    const l = v.lang.toLowerCase();
-    if (l.startsWith(preferredLang)) return 0;
-    if (l.startsWith('en')) return 1;
-    return 2;
-  };
-  const sortedVoices = [...voices].sort(
-    (a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name),
-  );
+  // While reading translated content, only voices that can speak that language
+  // are offered (the engine auto-picks one when "Automatic" is selected).
+  // Otherwise show everything, English first, since most system voice lists
+  // are long and unsorted.
+  const lang = contentLang?.toLowerCase();
+  const rank = (v: SpeechSynthesisVoice) => (v.lang.toLowerCase().startsWith('en') ? 0 : 1);
+  const sortedVoices = (lang ? voices.filter((v) => v.lang.toLowerCase().startsWith(lang)) : [...voices])
+    .sort((a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+
+  let langName: string | undefined;
+  if (lang) {
+    try {
+      langName = new Intl.DisplayNames(['en'], { type: 'language' }).of(lang);
+    } catch {
+      langName = lang;
+    }
+  }
 
   return (
     <div
@@ -145,7 +153,10 @@ export default function TtsPanel({
             Device voice
           </option>
           <option value="kokoro" style={{ backgroundColor: t.bg }}>
-            Enhanced{kokoroLoad.state === 'ready' ? '' : ' (~120 MB download)'}
+            Enhanced
+            {kokoroLoad.state === 'ready'
+              ? ''
+              : ` (~${kokoroBackend === 'webgpu' ? '350' : '120'} MB download)`}
           </option>
         </select>
 
@@ -159,7 +170,7 @@ export default function TtsPanel({
             aria-label="Voice"
           >
             <option value="" style={{ backgroundColor: t.bg }}>
-              System default
+              {langName ? `Automatic (${langName})` : 'System default'}
             </option>
             {sortedVoices.map((v) => (
               <option key={v.voiceURI} value={v.voiceURI} style={{ backgroundColor: t.bg }}>
@@ -213,7 +224,9 @@ export default function TtsPanel({
 
       {engine === 'kokoro' && kokoroLoad.state === 'idle' && (
         <p className="text-xs" style={{ color: t.fg, opacity: 0.5 }}>
-          The enhanced voice runs entirely on your device. One-time download, cached for offline use.
+          The enhanced voice runs entirely on your device
+          {kokoroBackend === 'webgpu' ? ', accelerated by your GPU' : ''}. One-time download,
+          cached for offline use.
         </p>
       )}
 

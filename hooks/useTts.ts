@@ -30,11 +30,40 @@ interface KokoroModelLike {
 
 const KOKORO_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
+export type KokoroBackend = 'webgpu' | 'wasm';
+
 let kokoroInstance: KokoroModelLike | null = null;
 let kokoroPromise: Promise<KokoroModelLike> | null = null;
+let kokoroActiveBackend: KokoroBackend | null = null;
 
 export function isKokoroReady(): boolean {
   return kokoroInstance !== null;
+}
+
+// WebGPU is typically 5–20× faster than WASM for this model, but requires the
+// fp32 weights (~330 MB download, ~1 GB in memory) — quantized weights aren't
+// reliable on the WebGPU backend. Skip it on low-memory devices: deviceMemory
+// is clamped to powers of two, so a 6 GB phone reports 4 and an 8 GB laptop
+// reports 8.
+let backendPromise: Promise<KokoroBackend> | null = null;
+export function detectKokoroBackend(): Promise<KokoroBackend> {
+  if (!backendPromise) {
+    backendPromise = (async () => {
+      try {
+        if (typeof navigator === 'undefined') return 'wasm';
+        const nav = navigator as Navigator & {
+          gpu?: { requestAdapter(): Promise<unknown | null> };
+          deviceMemory?: number;
+        };
+        if (nav.deviceMemory !== undefined && nav.deviceMemory < 8) return 'wasm';
+        if (!nav.gpu) return 'wasm';
+        return (await nav.gpu.requestAdapter()) ? 'webgpu' : 'wasm';
+      } catch {
+        return 'wasm';
+      }
+    })();
+  }
+  return backendPromise;
 }
 
 interface DownloadProgress {
@@ -49,23 +78,38 @@ function loadKokoro(onProgress?: (pct: number) => void): Promise<KokoroModelLike
   if (!kokoroPromise) {
     kokoroPromise = (async () => {
       const { KokoroTTS } = await import('kokoro-js');
-      const perFile = new Map<string, { loaded: number; total: number }>();
-      const tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
-        dtype: 'q8',
-        device: 'wasm',
-        progress_callback: (p: DownloadProgress) => {
-          if (p.status !== 'progress' || !p.file || !p.total) return;
-          perFile.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
-          let loaded = 0;
-          let total = 0;
-          for (const f of perFile.values()) {
-            loaded += f.loaded;
-            total += f.total;
-          }
-          if (total > 0) onProgress?.(Math.round((loaded / total) * 100));
-        },
-      });
-      kokoroInstance = tts as unknown as KokoroModelLike;
+
+      const attempt = async (device: KokoroBackend): Promise<KokoroModelLike> => {
+        const perFile = new Map<string, { loaded: number; total: number }>();
+        const tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+          dtype: device === 'webgpu' ? 'fp32' : 'q8',
+          device,
+          progress_callback: (p: DownloadProgress) => {
+            if (p.status !== 'progress' || !p.file || !p.total) return;
+            perFile.set(p.file, { loaded: p.loaded ?? 0, total: p.total });
+            let loaded = 0;
+            let total = 0;
+            for (const f of perFile.values()) {
+              loaded += f.loaded;
+              total += f.total;
+            }
+            if (total > 0) onProgress?.(Math.round((loaded / total) * 100));
+          },
+        });
+        kokoroActiveBackend = device;
+        return tts as unknown as KokoroModelLike;
+      };
+
+      const backend = await detectKokoroBackend();
+      if (backend === 'webgpu') {
+        try {
+          kokoroInstance = await attempt('webgpu');
+          return kokoroInstance;
+        } catch {
+          // GPU init can fail on flaky drivers — fall back to CPU/WASM
+        }
+      }
+      kokoroInstance = await attempt('wasm');
       return kokoroInstance;
     })().catch((e) => {
       kokoroPromise = null;
@@ -111,6 +155,12 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
   // Set in an effect (not read from window during render) to keep SSR and
   // client renders identical.
   const [supported, setSupported] = useState(true);
+  // Which backend Kokoro will use (or is using) on this device — lets the UI
+  // show the right download size before the user opts in.
+  const [kokoroBackend, setKokoroBackend] = useState<KokoroBackend | null>(kokoroActiveBackend);
+  useEffect(() => {
+    detectKokoroBackend().then((b) => setKokoroBackend(kokoroActiveBackend ?? b));
+  }, []);
 
   // Session token: bumped on every play/pause/stop/page-change so stale async
   // callbacks (utterance onend, audio onended, generation promises) are ignored.
@@ -185,6 +235,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
         setKokoroLoad((s) => (s.state === 'ready' ? s : { state: 'loading', progress: pct })),
       );
       setKokoroLoad({ state: 'ready', progress: 100 });
+      setKokoroBackend(kokoroActiveBackend);
       return model;
     } catch (e) {
       setKokoroLoad({ state: 'error', progress: 0, error: e instanceof Error ? e.message : String(e) });
@@ -222,6 +273,27 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
       return pending;
     },
     [ensureKokoro],
+  );
+
+  // Generate the rest of the page in the background while audio plays, so on
+  // slow devices the buffer builds up instead of stalling before each
+  // sentence. Generation is already serialised through genChainRef, and the
+  // session check aborts the loop on pause/stop/page change.
+  const prefetchFrom = useCallback(
+    (from: number, session: number) => {
+      void (async () => {
+        for (let i = from; i < sentencesRef.current.length; i++) {
+          if (session !== sessionRef.current) return;
+          if (audioCacheRef.current.has(i)) continue;
+          try {
+            await getKokoroAudio(i);
+          } catch {
+            return; // playback path surfaces model errors
+          }
+        }
+      })();
+    },
+    [getKokoroAudio],
   );
 
   const finishPage = useCallback(() => {
@@ -299,8 +371,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
               if (session === sessionRef.current) speakSentenceRef.current(idx + 1, session);
             };
             await audio.play();
-            // Prefetch the next sentence while this one plays
-            if (idx + 1 < sentencesRef.current.length) getKokoroAudio(idx + 1).catch(() => {});
+            prefetchFrom(idx + 1, session);
           } catch {
             if (session !== sessionRef.current) return;
             setBusy(false);
@@ -310,7 +381,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
         })();
       }
     },
-    [finishPage, getKokoroAudio, getAudioEl],
+    [finishPage, getKokoroAudio, getAudioEl, prefetchFrom],
   );
 
   useEffect(() => {
@@ -441,6 +512,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
     activeIndex,
     voices,
     kokoroLoad,
+    kokoroBackend,
     supported,
     play,
     pause,
