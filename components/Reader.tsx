@@ -263,6 +263,12 @@ export default function Reader({ bookId }: { bookId: string }) {
       if (progress) setCurrentPage(progress.currentPage);
       const json = await getStorageJson<ExtractedBook>(bookData.textStoragePath);
       setPages(json.pages);
+      // Image-only PDFs (scanned, or printed-to-PDF with text drawn as vector
+      // outlines) extract no text at all — open the original-PDF view instead
+      // of an empty reader.
+      if (bookData.fileType !== 'epub' && json.pages.every((p) => !p.text.trim())) {
+        setViewMode('pdf');
+      }
       setLoading(false);
     })();
   }, [user, bookId]);
@@ -908,7 +914,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               </div>
             )}
           </div>
-        ) : (
+        ) : pageText.trim() ? (
           <div className="max-w-[65ch] mx-auto">
             <PageContent
               html={contentHtml}
@@ -916,6 +922,22 @@ export default function Reader({ bookId }: { bookId: string }) {
               fontSize={fontSize}
               fontFamily={fontFamily}
             />
+          </div>
+        ) : (
+          <div className="max-w-[65ch] mx-auto flex flex-col items-center gap-4 py-16 text-center">
+            <p className="text-sm" style={{ opacity: 0.55 }}>
+              No text could be extracted from this page — it may be a scanned
+              image or have its text drawn as graphics.
+            </p>
+            {book?.fileType !== 'epub' && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setViewMode('pdf'); }}
+                className="text-xs px-3 py-1.5 rounded border transition-colors"
+                style={{ borderColor: t.border, color: t.fg, backgroundColor: t.hover }}
+              >
+                View original PDF page
+              </button>
+            )}
           </div>
         )}
       </main>

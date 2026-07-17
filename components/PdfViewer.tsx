@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getStorageDownloadUrl } from '@/lib/firestore';
+import { ensureReadableStreamAsyncIterator } from '@/lib/streamPolyfill';
 
 interface Props {
   storagePath: string;
@@ -23,6 +24,7 @@ export default function PdfViewer({ storagePath, currentPage, bgColor, borderCol
     let cancelled = false;
     (async () => {
       try {
+        ensureReadableStreamAsyncIterator();
         const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
         const url = await getStorageDownloadUrl(storagePath);

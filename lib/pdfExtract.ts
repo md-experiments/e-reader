@@ -1,4 +1,5 @@
 import type { ExtractedBook, PageData, PageSegment, TocEntry } from '@/types';
+import { ensureReadableStreamAsyncIterator } from '@/lib/streamPolyfill';
 
 interface RawLine {
   y: number;
@@ -144,6 +145,7 @@ export async function extractPdfPages(
   file: File,
   onProgress?: (page: number, total: number) => void,
 ): Promise<ExtractedBook> {
+  ensureReadableStreamAsyncIterator();
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 

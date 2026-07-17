@@ -1,10 +1,13 @@
 // Thumbnail generation — all functions are client-side only (called from UploadFlow).
 
+import { ensureReadableStreamAsyncIterator } from '@/lib/streamPolyfill';
+
 const TARGET_WIDTH = 300;
 
 /** Render PDF page 1 to a JPEG blob at TARGET_WIDTH pixels wide. */
 export async function generatePdfThumbnail(file: File): Promise<Blob | null> {
   try {
+    ensureReadableStreamAsyncIterator();
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
     pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 

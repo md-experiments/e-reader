@@ -133,4 +133,6 @@ const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 1
 | Google sign-in "action invalid" | Missing OAuth redirect URI | Add `https://<project>.firebaseapp.com/__/auth/handler` to GCP credentials |
 | CORS error fetching pages.json | Storage bucket CORS not configured | Apply CORS JSON via gsutil or GCP Console |
 | Spaces stripped from extracted text | Items joined with `''` instead of `' '` | Always join with `' '` then normalise with `/\s+/g` |
+| Safari: `undefined is not a function (near '...t of e...')` on upload | pdfjs `getTextContent` does `for await` over a ReadableStream; Safari < 18.4 can't async-iterate streams | Call `ensureReadableStreamAsyncIterator()` (lib/streamPolyfill.ts) before any pdfjs use |
+| Book uploads but reader pages are blank | PDF has no text layer (scanned, or text drawn as vector outlines, e.g. "Microsoft: Print To PDF") | Expected — Reader auto-opens PDF view for such books; extraction can't recover text without OCR |
 | Word spacing lost when joining lines | Lines joined without separator | Join lines within a paragraph with `' '` |
