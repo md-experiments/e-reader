@@ -123,6 +123,28 @@ Settings (fontSize, theme, fontFamily) are stored under the key `lexis-reader-se
 const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
 ```
 
+## Listening with the screen off
+
+Phones suspend both the speech engine and JS timers the moment the screen
+locks, which silently kills playback mid-page. Two mechanisms cover it, and
+both are language-agnostic (they apply equally to the Bulgarian translation
+view):
+
+1. **Screen wake lock** — `useWakeLock(active)` (`hooks/useWakeLock.ts`) holds a
+   `navigator.wakeLock` screen lock while TTS status is `playing`, gated by the
+   `ttsKeepAwake` setting (default on, "Screen on" toggle in the TTS panel).
+   The browser drops the lock whenever the tab is hidden, so it is re-requested
+   on every `visibilitychange` back to visible.
+2. **Stall recovery** — a watchdog in `useTts` polls while playing and restarts
+   the current sentence when playback has gone quiet for two consecutive checks
+   (never while the page is hidden, so it doesn't fight a legitimately
+   suspended engine). On unlock it recovers in well under a second. A sentence
+   is retried at most twice before being skipped, so a phrase the engine chokes
+   on can't loop forever.
+
+`useTts` also publishes Media Session metadata + play/pause/stop handlers, so
+the audio engine gets lock-screen controls.
+
 ## Common pitfalls
 
 | Symptom | Cause | Fix |
@@ -136,3 +158,4 @@ const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 1
 | Safari: `undefined is not a function (near '...t of e...')` on upload | pdfjs `getTextContent` does `for await` over a ReadableStream; Safari < 18.4 can't async-iterate streams | Call `ensureReadableStreamAsyncIterator()` (lib/streamPolyfill.ts) before any pdfjs use |
 | Book uploads but reader pages are blank | PDF has no text layer (scanned, or text drawn as vector outlines, e.g. "Microsoft: Print To PDF") | Expected — Reader auto-opens PDF view for such books; extraction can't recover text without OCR |
 | Word spacing lost when joining lines | Lines joined without separator | Join lines within a paragraph with `' '` |
+| Listening dies when the phone screen turns off | OS suspends the speech engine and JS timers | Wake lock while playing + the stall watchdog in `useTts` (see "Listening with the screen off") |

@@ -25,6 +25,7 @@ import TocSidebar from '@/components/TocSidebar';
 import HighlightsPanel from '@/components/HighlightsPanel';
 import TtsPanel from '@/components/TtsPanel';
 import { useTts, type TtsEngine, type TtsStatus } from '@/hooks/useTts';
+import { useWakeLock } from '@/hooks/useWakeLock';
 import { splitIntoSentences, applyTtsHighlight, clearTtsHighlight, scrollRangeIntoView } from '@/lib/tts';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
@@ -159,6 +160,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   // never clobbers the reading voice and needs no manual re-selection.
   const [ttsWebVoiceBg, setTtsWebVoiceBg] = useState<string | null>(() => loadSetting('ttsWebVoiceBg', null));
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<string>(() => loadSetting('ttsKokoroVoice', 'af_heart'));
+  // Hold a screen wake lock while listening, so the phone doesn't lock itself
+  // and suspend playback mid-page.
+  const [ttsKeepAwake, setTtsKeepAwake] = useState<boolean>(() => loadSetting('ttsKeepAwake', true));
 
   const contentRef = useRef<HTMLDivElement>(null);
   const translationRef = useRef<HTMLDivElement>(null);
@@ -194,6 +198,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => { saveSettings({ ttsWebVoice }); }, [ttsWebVoice]);
   useEffect(() => { saveSettings({ ttsWebVoiceBg }); }, [ttsWebVoiceBg]);
   useEffect(() => { saveSettings({ ttsKokoroVoice }); }, [ttsKokoroVoice]);
+  useEffect(() => { saveSettings({ ttsKeepAwake }); }, [ttsKeepAwake]);
 
   // Remember this as the last opened book
   useEffect(() => {
@@ -592,7 +597,13 @@ export default function Reader({ bookId }: { bookId: string }) {
     kokoroVoice: ttsKokoroVoice,
     lang: ttsContentLang,
     onPageComplete: handleTtsPageComplete,
+    mediaTitle: book?.title,
+    mediaArtist: `Page ${currentPage}${readingTranslation ? ' · Bulgarian' : ''}`,
   });
+
+  // Keep the screen awake only while actually speaking — a lock held during
+  // silent reading would just burn battery.
+  const wakeLockState = useWakeLock(ttsKeepAwake && tts.status === 'playing');
 
   useEffect(() => {
     ttsStatusRef.current = tts.status;
@@ -772,6 +783,9 @@ export default function Reader({ bookId }: { bookId: string }) {
           rate={ttsRate}
           webVoiceURI={readingTranslation ? ttsWebVoiceBg : ttsWebVoice}
           kokoroVoice={ttsKokoroVoice}
+          keepAwake={ttsKeepAwake}
+          wakeLockState={wakeLockState}
+          onKeepAwakeChange={setTtsKeepAwake}
           onPlayPause={() => (tts.status === 'playing' ? tts.pause() : tts.play())}
           onStop={tts.stop}
           onEngineChange={handleTtsEngineChange}
