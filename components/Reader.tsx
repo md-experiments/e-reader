@@ -26,7 +26,14 @@ import HighlightsPanel from '@/components/HighlightsPanel';
 import TtsPanel from '@/components/TtsPanel';
 import { useTts, type TtsEngine, type TtsStatus } from '@/hooks/useTts';
 import { useWakeLock } from '@/hooks/useWakeLock';
-import { splitIntoSentences, applyTtsHighlight, clearTtsHighlight, scrollRangeIntoView } from '@/lib/tts';
+import {
+  splitIntoSentences,
+  applyTtsHighlight,
+  clearTtsHighlight,
+  scrollRangeIntoView,
+  sentenceIndexAtOffset,
+  offsetFromPoint,
+} from '@/lib/tts';
 import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
 
 // ── Themes ────────────────────────────────────────────────────────────────────
@@ -87,6 +94,35 @@ function saveSettings(settings: Record<string, unknown>) {
   try {
     const existing = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...existing, ...settings }));
+  } catch {}
+}
+
+// ── Listening position persistence ────────────────────────────────────────────
+// The sentence last spoken, per book and per content mode — the translation has
+// its own sentence list, so the two modes can't share an index. Stored in
+// localStorage next to the scroll positions; Firestore keeps the page-level
+// reading progress.
+
+type TtsMode = 'text' | 'translation';
+
+interface TtsPosition {
+  page: number;
+  index: number;
+}
+
+function loadTtsPositions(bookId: string): Partial<Record<TtsMode, TtsPosition>> {
+  try {
+    const raw = localStorage.getItem(`lexis-tts-pos-${bookId}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTtsPosition(bookId: string, mode: TtsMode, position: TtsPosition) {
+  try {
+    const all = loadTtsPositions(bookId);
+    localStorage.setItem(`lexis-tts-pos-${bookId}`, JSON.stringify({ ...all, [mode]: position }));
   } catch {}
 }
 
@@ -173,6 +209,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   // listening when the page turned" needs.
   const ttsStatusRef = useRef<TtsStatus>('stopped');
   const ttsStopRef = useRef<() => void>(() => {});
+  const ttsResumeFractionRef = useRef<(fraction: number | null) => void>(() => {});
+  // Sentence being spoken and how many there are, for mapping the position
+  // onto the other mode's sentence list when the view switches.
+  const ttsPositionRef = useRef<{ index: number | null; count: number }>({ index: null, count: 0 });
   const fetchTranslationRef = useRef<(page: number) => void>(() => {});
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -525,6 +565,10 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   const handleTranslate = useCallback(async () => {
     if (!user || !isAdmin) return;
+    // Carry the listening position across the switch. The translation has its
+    // own sentence count, so it travels as a fraction of the page.
+    const { index, count } = ttsPositionRef.current;
+    if (index !== null && count > 0) ttsResumeFractionRef.current(index / count);
     if (viewMode === 'translation') {
       setViewMode('reader');
       return;
@@ -608,7 +652,73 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => {
     ttsStatusRef.current = tts.status;
     ttsStopRef.current = tts.stop;
+    ttsResumeFractionRef.current = tts.setResumeFraction;
+    ttsPositionRef.current = { index: tts.activeIndex, count: ttsSentences.length };
   });
+
+  // ── Listening position: remember and restore ────────────────────────────────
+
+  const ttsMode: TtsMode = readingTranslation ? 'translation' : 'text';
+
+  useEffect(() => {
+    if (tts.activeIndex === null) return;
+    saveTtsPosition(bookId, ttsMode, { page: currentPage, index: tts.activeIndex });
+  }, [tts.activeIndex, bookId, ttsMode, currentPage]);
+
+  // Once the page's sentences exist, prime the playhead with the saved
+  // position so the first press of play continues where listening left off.
+  // seek() deliberately doesn't highlight, so the restored scroll position of
+  // a page the user was *reading* isn't yanked around.
+  const ttsRestoredRef = useRef(false);
+  const ttsSeek = tts.seek;
+  useEffect(() => {
+    if (ttsRestoredRef.current || loading || ttsSentences.length === 0) return;
+    ttsRestoredRef.current = true;
+    const saved = loadTtsPositions(bookId)[ttsMode];
+    if (saved && saved.page === currentPage) ttsSeek(saved.index);
+  }, [loading, ttsSentences, bookId, ttsMode, currentPage, ttsSeek]);
+
+  // Start (or restart) listening at the sentence covering a character offset
+  // into the text on screen — the shared entry point for tapping a sentence
+  // and for "Listen from here" on a selection.
+  const ttsPlay = tts.play;
+  const listenFromOffset = useCallback(
+    (offset: number) => {
+      if (ttsSentences.length === 0) return;
+      setShowTts(true);
+      ttsPlay(sentenceIndexAtOffset(ttsSentences, offset));
+    },
+    [ttsSentences, ttsPlay],
+  );
+
+  // Tap a sentence to start there. Gated on the TTS panel being open so that
+  // ordinary taps — dismissing a panel, clearing a selection — keep their
+  // meaning for readers who aren't listening.
+  const handleContentClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!showTts || colorPicker) return;
+      if (e.detail === 0) return; // keyboard-triggered click: no coordinates
+      const root = viewMode === 'translation' ? translationRef.current : contentRef.current;
+      if (!root) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return; // selecting, not jumping
+      const offset = offsetFromPoint(root, e.clientX, e.clientY);
+      if (offset === null) return;
+      listenFromOffset(offset);
+    },
+    [showTts, colorPicker, viewMode, listenFromOffset],
+  );
+
+  // "Listen from here" on the highlight bar: the selection's own offset is
+  // already computed against the flat page text.
+  const listenFromSelection = useCallback(() => {
+    if (!colorPicker) return;
+    const { startOffset } = colorPicker;
+    window.getSelection()?.removeAllRanges();
+    setNoteInput('');
+    setColorPicker(null);
+    listenFromOffset(startOffset);
+  }, [colorPicker, listenFromOffset]);
 
   const handleTtsEngineChange = useCallback(
     (engine: TtsEngine) => {
@@ -917,6 +1027,7 @@ export default function Reader({ bookId }: { bookId: string }) {
             ) : (
               <div
                 ref={translationRef}
+                onClick={handleContentClick}
                 className="select-text whitespace-pre-wrap"
                 style={{
                   fontSize: `${fontSize}px`,
@@ -929,7 +1040,7 @@ export default function Reader({ bookId }: { bookId: string }) {
             )}
           </div>
         ) : pageText.trim() ? (
-          <div className="max-w-[65ch] mx-auto">
+          <div className="max-w-[65ch] mx-auto" onClick={handleContentClick}>
             <PageContent
               html={contentHtml}
               contentRef={contentRef}
@@ -974,19 +1085,32 @@ export default function Reader({ bookId }: { bookId: string }) {
         {/* Header row: label + dismiss */}
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <span className="text-xs font-semibold opacity-50" style={{ color: t.fg }}>Highlight</span>
-          <button
+          <div className="flex items-center gap-1">
+            {/* Start listening at the selected passage instead of highlighting it */}
+            <button
+              onPointerDown={(e) => { e.preventDefault(); listenFromSelection(); }}
+              className="text-xs px-2.5 py-1 rounded border transition-colors flex items-center gap-1.5"
+              style={{ borderColor: t.border, color: t.fg }}
+            >
+              <svg width="9" height="9" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                <path d="M3.5 1.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
+              </svg>
+              Listen from here
+            </button>
+            <button
             onPointerDown={(e) => {
               e.preventDefault();
               window.getSelection()?.removeAllRanges();
               setNoteInput('');
               setColorPicker(null);
             }}
-            className="w-7 h-7 flex items-center justify-center rounded-full opacity-40 hover:opacity-100 active:opacity-100 transition-opacity"
-            style={{ color: t.fg }}
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
+              className="w-7 h-7 flex items-center justify-center rounded-full opacity-40 hover:opacity-100 active:opacity-100 transition-opacity"
+              style={{ color: t.fg }}
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
         </div>
         {/* Note input */}
         <div className="px-4 pb-2">
