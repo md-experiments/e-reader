@@ -141,9 +141,22 @@ interface UseTtsArgs {
   /** Called when the last sentence of the page finishes. Return true if the
    *  reader is advancing to another page (playback then auto-continues). */
   onPageComplete: () => boolean;
+  /** Shown on the lock screen / notification media controls (Media Session). */
+  mediaTitle?: string;
+  mediaArtist?: string;
 }
 
-export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang, onPageComplete }: UseTtsArgs) {
+export function useTts({
+  sentences,
+  engine,
+  rate,
+  webVoiceURI,
+  kokoroVoice,
+  lang,
+  onPageComplete,
+  mediaTitle,
+  mediaArtist,
+}: UseTtsArgs) {
   const [status, setStatus] = useState<TtsStatus>('stopped');
   const [busy, setBusy] = useState(false); // waiting on model load / generation
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -173,6 +186,10 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
   const pendingGenRef = useRef<Map<number, Promise<string>>>(new Map());
   const genChainRef = useRef<Promise<unknown>>(Promise.resolve()); // serialise WASM inference
   const pageGenRef = useRef(0); // invalidates cached audio when sentences change
+  // Stall detection (see the watchdog effect below)
+  const busyRef = useRef(busy);
+  const lastProgressRef = useRef(0); // ms timestamp of the last sign of life
+  const sawBoundaryRef = useRef(false); // does this device emit word-boundary events?
 
   const sentencesRef = useRef(sentences);
   const engineRef = useRef(engine);
@@ -183,6 +200,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
   const voicesRef = useRef(voices);
   const onPageCompleteRef = useRef(onPageComplete);
   useEffect(() => {
+    busyRef.current = busy;
     sentencesRef.current = sentences;
     engineRef.current = engine;
     rateRef.current = rate;
@@ -339,6 +357,15 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
           // No matching installed voice — let the engine resolve the language
           u.lang = contentLang;
         }
+        u.onstart = () => {
+          lastProgressRef.current = Date.now();
+        };
+        // Not every device fires boundary events; when they do fire they are
+        // the only reliable proof that the engine is still producing audio.
+        u.onboundary = () => {
+          sawBoundaryRef.current = true;
+          lastProgressRef.current = Date.now();
+        };
         u.onend = () => {
           if (session === sessionRef.current) speakSentenceRef.current(idx + 1, session);
         };
@@ -353,6 +380,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
           speakSentenceRef.current(idx + 1, session); // skip a sentence the engine chokes on
         };
         utteranceRef.current = u;
+        lastProgressRef.current = Date.now();
         window.speechSynthesis.speak(u);
       } else {
         setBusy(true);
@@ -370,6 +398,7 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
             audio.onerror = () => {
               if (session === sessionRef.current) speakSentenceRef.current(idx + 1, session);
             };
+            lastProgressRef.current = Date.now();
             await audio.play();
             prefetchFrom(idx + 1, session);
           } catch {
@@ -436,6 +465,125 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
     setBusy(false);
     setStatusBoth('stopped');
   }, []);
+
+  // ── Screen-off / background recovery ────────────────────────────────────────
+  // When a phone locks its screen the speech engine is suspended and JS timers
+  // are frozen: playback dies mid-page with no 'end' and no 'error' event, so
+  // the reader would sit silently in its 'playing' state forever. A screen wake
+  // lock (useWakeLock) normally prevents the lock in the first place, but it
+  // isn't available on every browser and the user can always press the power
+  // button — so watch for playback that has gone quiet and pick it back up from
+  // the sentence it died on. Applies to both engines and to any language,
+  // including the Bulgarian translation view.
+  useEffect(() => {
+    if (status !== 'playing') return;
+
+    let quiet = 0; // consecutive silent observations (one alone is normal)
+    let retryIndex = -1; // a sentence the engine keeps choking on
+    let retries = 0;
+
+    const stalled = (): boolean => {
+      if (busyRef.current) return false; // generating audio, not stalled
+      if (sentencesRef.current.length === 0) return false; // waiting for page text
+
+      if (engineRef.current === 'webspeech') {
+        if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+        const synth = window.speechSynthesis;
+        if (synth.paused) {
+          synth.resume(); // some engines come back from a lock still paused
+          return false;
+        }
+        if (synth.speaking || synth.pending) {
+          // Claims to be speaking but may be silently wedged — only provable
+          // on devices that emit boundary events.
+          return sawBoundaryRef.current && Date.now() - lastProgressRef.current > 12_000;
+        }
+        return true;
+      }
+
+      const audio = audioRef.current;
+      return !audio || audio.paused;
+    };
+
+    const check = () => {
+      // While hidden the engine is legitimately suspended; don't fight it.
+      if (document.visibilityState !== 'visible') {
+        quiet = 0;
+        return;
+      }
+      if (statusRef.current !== 'playing') return;
+      if (!stalled()) {
+        quiet = 0;
+        return;
+      }
+      if (++quiet < 2) return;
+      quiet = 0;
+      const idx = indexRef.current;
+      if (idx !== retryIndex) {
+        retryIndex = idx;
+        retries = 0;
+      }
+      // Two failed restarts means the sentence itself is the problem — skip it
+      // rather than loop on it.
+      play(retries++ >= 2 ? idx + 1 : idx);
+    };
+
+    const interval = setInterval(check, 3000);
+    // On unlock, don't wait a whole poll cycle: bank one quiet observation so a
+    // single confirming check resumes playback within half a second.
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      quiet = 1;
+      setTimeout(check, 500);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [status, play]);
+
+  // ── Media Session ───────────────────────────────────────────────────────────
+  // Lock-screen / notification controls, and a hint to the OS that this tab is
+  // a media source rather than an idle page. Only the audio engine drives a
+  // real media element, so this is what the phone shows while listening.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    ms.playbackState = status === 'playing' ? 'playing' : status === 'paused' ? 'paused' : 'none';
+    if (status === 'stopped') return;
+    try {
+      ms.metadata = new MediaMetadata({ title: mediaTitle || 'Lexis', artist: mediaArtist || '' });
+    } catch {
+      // MediaMetadata missing on older browsers — controls still work
+    }
+  }, [status, mediaTitle, mediaArtist]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const handlers: [MediaSessionAction, () => void][] = [
+      ['play', () => play()],
+      ['pause', () => pause()],
+      ['stop', () => stop()],
+    ];
+    for (const [action, handler] of handlers) {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Unsupported action — ignore
+      }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch {
+          // Unsupported action — ignore
+        }
+      }
+    };
+  }, [play, pause, stop]);
 
   // Page (sentences) changed: reset, and auto-continue if we were playing.
   const prevSentencesRef = useRef(sentences);
@@ -510,6 +658,9 @@ export function useTts({ sentences, engine, rate, webVoiceURI, kokoroVoice, lang
       audioRef.current?.pause();
       for (const url of cache.values()) URL.revokeObjectURL(url);
       cache.clear();
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+      }
     };
   }, []);
 

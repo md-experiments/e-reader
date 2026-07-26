@@ -2,6 +2,7 @@
 
 import type { TtsEngine, TtsStatus, KokoroLoadState, KokoroBackend } from '@/hooks/useTts';
 import { KOKORO_VOICES } from '@/hooks/useTts';
+import type { WakeLockState } from '@/hooks/useWakeLock';
 
 interface ThemeLike {
   bg: string;
@@ -27,12 +28,17 @@ interface TtsPanelProps {
   rate: number;
   webVoiceURI: string | null;
   kokoroVoice: string;
+  /** Whether the screen should be kept awake while listening. */
+  keepAwake: boolean;
+  /** Live state of the wake lock (only meaningful while playing). */
+  wakeLockState: WakeLockState;
   onPlayPause: () => void;
   onStop: () => void;
   onEngineChange: (engine: TtsEngine) => void;
   onRateChange: (rate: number) => void;
   onWebVoiceChange: (voiceURI: string | null) => void;
   onKokoroVoiceChange: (voice: string) => void;
+  onKeepAwakeChange: (keepAwake: boolean) => void;
 }
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -50,12 +56,15 @@ export default function TtsPanel({
   rate,
   webVoiceURI,
   kokoroVoice,
+  keepAwake,
+  wakeLockState,
   onPlayPause,
   onStop,
   onEngineChange,
   onRateChange,
   onWebVoiceChange,
   onKokoroVoiceChange,
+  onKeepAwakeChange,
 }: TtsPanelProps) {
   const selectStyle: React.CSSProperties = {
     backgroundColor: 'transparent',
@@ -193,7 +202,43 @@ export default function TtsPanel({
             ))}
           </select>
         )}
+
+        {/* Keep the screen awake while listening — phones suspend the speech
+            engine as soon as they lock, which cuts playback off mid-page. */}
+        <button
+          onClick={() => onKeepAwakeChange(!keepAwake)}
+          role="switch"
+          aria-checked={keepAwake}
+          className="text-xs px-2.5 py-1.5 rounded border transition-colors flex items-center gap-1.5"
+          style={{
+            borderColor: t.border,
+            color: t.fg,
+            backgroundColor: keepAwake ? t.hover : 'transparent',
+            opacity: keepAwake ? 1 : 0.55,
+          }}
+          title="Keep the screen on while listening"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <rect x="4.5" y="1" width="7" height="14" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <circle cx="8" cy="12.4" r="0.8" />
+          </svg>
+          Screen on
+        </button>
       </div>
+
+      {keepAwake && wakeLockState === 'unsupported' && (
+        <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>
+          This browser can&apos;t hold the screen awake. Listening stops when the screen turns off and
+          picks up from the same sentence when you unlock.
+        </p>
+      )}
+
+      {keepAwake && wakeLockState === 'denied' && (
+        <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>
+          Couldn&apos;t keep the screen on — battery saver is usually the reason. Listening resumes from
+          the same sentence when you unlock.
+        </p>
+      )}
 
       {engine === 'kokoro' && contentLang && (
         <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>
