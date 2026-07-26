@@ -451,6 +451,25 @@ export function useTts({
     setStatusBoth('paused'); // activeIndex stays put so the highlight remains
   }, []);
 
+  // Move the playhead without starting playback — used to restore a saved
+  // listening position, so the next play() picks up where the user left off.
+  // Deliberately does not touch activeIndex: highlighting (and its scroll)
+  // would fight the reader's own saved scroll position on load.
+  const seek = useCallback((index: number) => {
+    const list = sentencesRef.current;
+    if (list.length === 0) return;
+    indexRef.current = Math.min(Math.max(0, index), list.length - 1);
+  }, []);
+
+  // Where playback should resume when the sentence list is next replaced (a
+  // page turn, or a switch between the original text and its translation).
+  // Expressed as a fraction of the page so it carries across a translation
+  // with a different sentence count. Cleared once consumed.
+  const resumeFractionRef = useRef<number | null>(null);
+  const setResumeFraction = useCallback((fraction: number | null) => {
+    resumeFractionRef.current = fraction;
+  }, []);
+
   const stop = useCallback(() => {
     ++sessionRef.current;
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -601,8 +620,17 @@ export function useTts({
     indexRef.current = 0;
     setActiveIndex(null);
     setBusy(false);
+    // A pending resume fraction (set when switching between the text and its
+    // translation) maps the old position onto the new sentence list.
+    const resumeIndex = (): number => {
+      const fraction = resumeFractionRef.current;
+      resumeFractionRef.current = null;
+      if (fraction === null) return 0;
+      return Math.min(sentences.length - 1, Math.max(0, Math.round(fraction * sentences.length)));
+    };
+
     if (wasPlaying && sentences.length > 0) {
-      play(0);
+      play(resumeIndex());
     } else if (wasPlaying) {
       // The new page has no readable text *yet* (e.g. its translation is
       // still being fetched). Hold the playing state — this effect fires
@@ -610,6 +638,9 @@ export function useTts({
       // or the user stopping ends the wait.
       setBusy(true);
     } else {
+      // Not playing: still honour a pending resume position, so switching view
+      // while paused and pressing play continues from roughly the same place.
+      if (sentences.length > 0) indexRef.current = resumeIndex();
       setStatusBoth('stopped');
     }
   }, [sentences, play, clearAudioCache]);
@@ -675,6 +706,8 @@ export function useTts({
     play,
     pause,
     stop,
+    seek,
+    setResumeFraction,
     preloadKokoro,
   };
 }

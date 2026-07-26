@@ -70,6 +70,59 @@ function chunkLong(text: string, start: number, out: Sentence[]) {
   if (rest) out.push({ text: rest, start: off, end: off + rest.length });
 }
 
+/**
+ * Index of the sentence containing `offset`. Offsets that land between
+ * sentences (paragraph breaks, skipped punctuation) resolve to the next
+ * sentence, so a tap anywhere reads on from the nearest following text.
+ */
+export function sentenceIndexAtOffset(sentences: Sentence[], offset: number): number {
+  for (let i = 0; i < sentences.length; i++) {
+    if (offset < sentences[i].end) return i;
+  }
+  return Math.max(0, sentences.length - 1);
+}
+
+/**
+ * Flat-text offset of a viewport point inside `root`, or null when the point
+ * isn't over text. Counts characters exactly the way the highlight offset
+ * system does (via Range.toString(), so the invisible '\n\n' separators between
+ * segments are included).
+ */
+export function offsetFromPoint(root: HTMLElement, x: number, y: number): number | null {
+  const doc = root.ownerDocument;
+  const caret = doc as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+
+  let node: Node | null = null;
+  let offset = 0;
+  if (typeof caret.caretPositionFromPoint === 'function') {
+    const pos = caret.caretPositionFromPoint(x, y);
+    if (pos) {
+      node = pos.offsetNode;
+      offset = pos.offset;
+    }
+  } else if (typeof caret.caretRangeFromPoint === 'function') {
+    // Safari
+    const range = caret.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node || !root.contains(node)) return null;
+
+  try {
+    const pre = doc.createRange();
+    pre.setStart(root, 0);
+    pre.setEnd(node, offset);
+    return pre.toString().length;
+  } catch {
+    return null; // node moved out from under us
+  }
+}
+
 // ── Current-sentence highlight (CSS Custom Highlight API) ────────────────────
 
 const TTS_HIGHLIGHT_NAME = 'lexis-tts';

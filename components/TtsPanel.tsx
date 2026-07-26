@@ -226,6 +226,10 @@ export default function TtsPanel({
         </button>
       </div>
 
+      <p className="text-xs" style={{ color: t.fg, opacity: 0.45 }}>
+        Tap any sentence in the text to start reading from there.
+      </p>
+
       {keepAwake && wakeLockState === 'unsupported' && (
         <p className="text-xs" style={{ color: t.fg, opacity: 0.6 }}>
           This browser can&apos;t hold the screen awake. Listening stops when the screen turns off and

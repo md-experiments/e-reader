@@ -123,6 +123,39 @@ Settings (fontSize, theme, fontFamily) are stored under the key `lexis-reader-se
 const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
 ```
 
+## Listening position
+
+`useTts` owns the playhead (`indexRef`) and exposes two ways to move it without
+the caller reaching inside:
+
+- `seek(index)` — primes the position without playing and **without**
+  highlighting, so restoring a saved position doesn't fight the reader's saved
+  scroll position. The next `play()` picks up there.
+- `setResumeFraction(f)` — where playback should land the next time the
+  sentence list is replaced, as a fraction of the page. Used when switching
+  between a page and its translation, whose sentence counts differ; consumed
+  once, and preserved while the hook is holding for a translation to arrive.
+
+`Reader` persists the last spoken sentence to `lexis-tts-pos-<bookId>` in
+localStorage, keyed by mode (`text` | `translation`) since the two have
+separate sentence lists, and restores it on load when the saved page matches
+the page reading progress reopened. Firestore still owns page-level progress.
+
+## Starting playback from a tap
+
+`sentenceIndexAtOffset(sentences, offset)` and `offsetFromPoint(root, x, y)`
+(both in `lib/tts.ts`) map a point in the rendered text to a sentence index.
+`offsetFromPoint` counts characters via `Range.toString()`, so it agrees with
+the highlight offset system, invisible `'\n\n'` separators included — the same
+offsets the splitter produced.
+
+Two entry points, both routed through `listenFromOffset` in `Reader`:
+tapping the text while the TTS panel is open, and "Listen from here" on the
+selection bar (which reuses the selection offset already computed for
+highlighting). Tap-to-listen is gated on the panel being open so ordinary taps
+keep dismissing panels; it works in the reader and translation views, not the
+PDF/EPUB view, which has no mapped text layer.
+
 ## Listening with the screen off
 
 Phones suspend both the speech engine and JS timers the moment the screen
