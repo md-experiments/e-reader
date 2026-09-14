@@ -19,6 +19,8 @@ lib/
   firebase.ts             Lazy Firebase init — getFirebaseAuth/Db/Storage()
   firestore.ts            All Firestore + Storage helpers
   pdfExtract.ts           PDF text + TOC extraction (pdfjs)
+  theme.ts                THEMES/FONTS + settings persistence, shared app-wide
+  offline.ts              IndexedDB cache of extracted book text
 hooks/useAuth.tsx         AuthContext + useAuth()
 types/index.ts            Shared TypeScript interfaces
 proxy.ts                  Next.js 16 middleware (NOT middleware.ts — that name is deprecated)
@@ -65,20 +67,48 @@ Next.js 16 renamed `middleware.ts` to `proxy.ts` and the export from `middleware
 
 ## Theming
 
-Themes are defined as plain objects in `components/Reader.tsx` and applied via `style={}` props — not Tailwind arbitrary values. This avoids class-name generation issues with dynamic values.
+Theme and reading font are **universal for a user**, not per book: whatever was
+last chosen in any book applies to every other book, to the library, and to the
+upload page. Both live in `lib/theme.ts`, which is the single source of truth —
+don't redefine palettes in components.
 
 ```ts
-const THEMES = {
+const THEMES: Record<Theme, ThemeConfig> = {
   light: { bg: '#ffffff', fg: '#111827', border: '#e5e7eb', hover: '#f3f4f6', ... },
   sepia: { ... },
   dark:  { ... },
   navy:  { bg: '#0d1b2e', fg: '#d4af6e', ... },
 };
-const t = THEMES[theme];
-// Usage: style={{ backgroundColor: t.bg, color: t.fg }}
 ```
 
-When building new reader UI, accept `t: ThemeConfig` as a prop and apply it the same way. Don't hardcode colours.
+There are two ways to consume it, and which one you want depends on where you are:
+
+**Inside the reader** — `const t = THEMES[theme]`, applied via `style={}` props,
+not Tailwind arbitrary values (this avoids class-name generation issues with
+dynamic values). New reader UI should accept `t: ThemeConfig` as a prop and do
+the same. Don't hardcode colours.
+
+**Everywhere else** — use the `lexis-*` Tailwind colour utilities:
+`bg-lexis-bg`, `text-lexis-fg`, `text-lexis-muted`, `bg-lexis-panel`,
+`border-lexis-border`, `hover:bg-lexis-hover`, `bg-lexis-track`,
+`text-lexis-accent`, `bg-lexis-accent-bg`. They're declared in
+`app/globals.css` under `@theme inline`, so each resolves its CSS custom
+property at use time and the whole document re-skins with no re-render. For the
+reading font use `style={{ fontFamily: 'var(--lexis-font)' }}`.
+
+The custom properties are written onto `<html>` in two places:
+
+1. `THEME_INIT_SCRIPT`, inlined by `app/layout.tsx` and run before first paint,
+   so no page flashes the light default on a cold load.
+2. `applyTheme(theme, fontFamily)`, called from a `useEffect` in `Reader` on
+   every change, so a theme picked mid-book reaches the library. Pages outside
+   the reader call `applyStoredTheme()` on mount to pick up a change made in
+   another tab.
+
+`ThemeConfig` carries `muted` / `panel` / `accent` / `accentBg` / `scheme`
+alongside the reader's own fields. Adding a field means updating all four themes,
+`cssVars()`, the `:root` light defaults in `globals.css`, and the matching
+`@theme inline` entry.
 
 ## Firestore data shape
 
@@ -117,11 +147,26 @@ Don't change this system without updating both the renderer and the offset compu
 
 ## Reader settings persistence
 
-Settings (fontSize, theme, fontFamily) are stored under the key `lexis-reader-settings` in localStorage. Use `loadSetting(key, fallback)` in a `useState` initialiser (not a `useEffect`) to avoid a flash of default values:
+Settings (fontSize, theme, fontFamily, the TTS preferences) are stored under the key `lexis-reader-settings` in localStorage. `loadSetting`/`saveSettings` live in `lib/theme.ts`. Use `loadSetting(key, fallback)` in a `useState` initialiser (not a `useEffect`) to avoid a flash of default values:
 
 ```ts
 const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
 ```
+
+## Offline books
+
+The library's badge on each cover (`lib/offline.ts`) stores a book's **extracted
+text only** — page text/segments plus the `Book` metadata — in IndexedDB under
+`lexis-offline`. The original PDF/EPUB stays in Storage, so the PDF/EPUB view
+still needs a connection; the reader view doesn't.
+
+IndexedDB rather than localStorage because a single book's `pages.json` routinely
+runs past localStorage's ~5 MB origin budget.
+
+`Reader` prefers the cached copy when one exists, and if Firestore is
+unreachable it falls back to the cached `Book` metadata plus the page mirrored
+in `lexis-progress-<bookId>` (written next to the Firestore progress save).
+Deleting a book from the library drops its offline copy too.
 
 ## Listening position
 
@@ -192,3 +237,6 @@ the audio engine gets lock-screen controls.
 | Book uploads but reader pages are blank | PDF has no text layer (scanned, or text drawn as vector outlines, e.g. "Microsoft: Print To PDF") | Expected — Reader auto-opens PDF view for such books; extraction can't recover text without OCR |
 | Word spacing lost when joining lines | Lines joined without separator | Join lines within a paragraph with `' '` |
 | Listening dies when the phone screen turns off | OS suspends the speech engine and JS timers | Wake lock while playing + the stall watchdog in `useTts` (see "Listening with the screen off") |
+| Library/upload flashes white before the dark theme appears | `THEME_INIT_SCRIPT` not reaching the document head | Keep the inline `<script>` in `app/layout.tsx` — it must run before the body renders |
+| A new `lexis-*` utility class has no effect | Colour not declared in the `@theme inline` block | Add `--color-lexis-<name>: var(--lexis-<name>)` in `app/globals.css` |
+| Hydration mismatch on a page that reads browser-only state | Branching on `indexedDB`/`localStorage` during render | Resolve it in a `useEffect` (see `offlineReady` in the library page) |

@@ -1,11 +1,41 @@
 @import "tailwindcss";
 
+/* Reader theme — the light defaults. The saved theme is written over these on
+   <html> before first paint (THEME_INIT_SCRIPT in lib/theme.ts) and whenever
+   the reader's theme/font changes (applyTheme). Keep in sync with THEMES.light. */
 :root {
   --font-geist: 'Geist', system-ui, sans-serif;
+
+  --lexis-bg: #ffffff;
+  --lexis-fg: #111827;
+  --lexis-border: #e5e7eb;
+  --lexis-hover: #f3f4f6;
+  --lexis-track: #e5e7eb;
+  --lexis-muted: #6b7280;
+  --lexis-panel: #f9fafb;
+  --lexis-accent: #b45309;
+  --lexis-accent-bg: #fef3c7;
+  --lexis-font: Georgia, 'Times New Roman', serif;
+}
+
+/* `inline` so the utilities resolve the custom property at use time — the
+   theme swap then needs no rebuilt CSS. */
+@theme inline {
+  --color-lexis-bg: var(--lexis-bg);
+  --color-lexis-fg: var(--lexis-fg);
+  --color-lexis-border: var(--lexis-border);
+  --color-lexis-hover: var(--lexis-hover);
+  --color-lexis-track: var(--lexis-track);
+  --color-lexis-muted: var(--lexis-muted);
+  --color-lexis-panel: var(--lexis-panel);
+  --color-lexis-accent: var(--lexis-accent);
+  --color-lexis-accent-bg: var(--lexis-accent-bg);
 }
 
 body {
   font-family: var(--font-geist);
+  background-color: var(--lexis-bg);
+  color: var(--lexis-fg);
 }
 
 /* Sentence currently being read aloud (CSS Custom Highlight API).

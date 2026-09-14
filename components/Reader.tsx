@@ -34,68 +34,30 @@ import {
   sentenceIndexAtOffset,
   offsetFromPoint,
 } from '@/lib/tts';
-import type { Book, PageData, Highlight, HighlightColor, ExtractedBook, TocEntry } from '@/types';
-
-// ── Themes ────────────────────────────────────────────────────────────────────
-
-type Theme = 'light' | 'sepia' | 'dark' | 'navy';
-
-interface ThemeConfig {
-  bg: string;
-  fg: string;
-  border: string;
-  hover: string;
-  track: string;
-  swatch: string;
-  label: string;
-}
-
-const THEMES: Record<Theme, ThemeConfig> = {
-  light: { bg: '#ffffff', fg: '#111827', border: '#e5e7eb', hover: '#f3f4f6', track: '#e5e7eb', swatch: '#ffffff', label: 'Light' },
-  sepia: { bg: '#fef8f0', fg: '#78350f', border: '#f9d8a0', hover: '#fde68a', track: '#f9d8a0', swatch: '#fef8f0', label: 'Sepia' },
-  dark:  { bg: '#0a0a0a', fg: '#e5e7eb', border: '#1f2937', hover: '#1f2937', track: '#1f2937', swatch: '#0a0a0a', label: 'Dark' },
-  navy:  { bg: '#0d1b2e', fg: '#d4af6e', border: '#1e3a5f', hover: '#1e3a5f', track: '#1e3a5f', swatch: '#0d1b2e', label: 'Navy' },
-};
-
-// ── Fonts ─────────────────────────────────────────────────────────────────────
-
-type FontFamily = 'georgia' | 'merriweather' | 'lora' | 'source-serif' | 'sans';
-
-interface FontConfig {
-  label: string;
-  style: string;
-}
-
-const FONTS: Record<FontFamily, FontConfig> = {
-  georgia:       { label: 'Georgia',      style: "Georgia, 'Times New Roman', serif" },
-  merriweather:  { label: 'Merriweather', style: 'var(--font-merriweather), serif' },
-  lora:          { label: 'Lora',         style: 'var(--font-lora), serif' },
-  'source-serif': { label: 'Source Serif', style: 'var(--font-source-serif), serif' },
-  sans:          { label: 'Sans',         style: 'var(--font-geist), system-ui, sans-serif' },
-};
-
-// ── Settings persistence ──────────────────────────────────────────────────────
-
-const SETTINGS_KEY = 'lexis-reader-settings';
-
-function loadSetting<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return key in parsed ? parsed[key] : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveSettings(settings: Record<string, unknown>) {
-  try {
-    const existing = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...existing, ...settings }));
-  } catch {}
-}
+import {
+  THEMES,
+  FONTS,
+  DEFAULT_THEME,
+  DEFAULT_FONT,
+  applyTheme,
+  loadSetting,
+  saveSettings,
+  type Theme,
+  type ThemeConfig,
+  type FontFamily,
+  type FontConfig,
+} from '@/lib/theme';
+import { getOfflineBook } from '@/lib/offline';
+import { OfflineIcon } from '@/components/icons';
+import type {
+  Book,
+  PageData,
+  Highlight,
+  HighlightColor,
+  ExtractedBook,
+  ReadingProgress,
+  TocEntry,
+} from '@/types';
 
 // ── Listening position persistence ────────────────────────────────────────────
 // The sentence last spoken, per book and per content mode — the translation has
@@ -124,6 +86,25 @@ function saveTtsPosition(bookId: string, mode: TtsMode, position: TtsPosition) {
     const all = loadTtsPositions(bookId);
     localStorage.setItem(`lexis-tts-pos-${bookId}`, JSON.stringify({ ...all, [mode]: position }));
   } catch {}
+}
+
+// ── Reading position mirror ───────────────────────────────────────────────────
+// Firestore owns the page-level progress, but a book saved for offline reading
+// has to reopen where it was left even with no network — so the current page is
+// mirrored into localStorage on every save.
+
+function loadLocalProgress(bookId: string): number | null {
+  try {
+    const raw = localStorage.getItem(`lexis-progress-${bookId}`);
+    const page = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(page) && page > 0 ? page : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalProgress(bookId: string, page: number) {
+  try { localStorage.setItem(`lexis-progress-${bookId}`, String(page)); } catch {}
 }
 
 // ── Page content (memoised) ───────────────────────────────────────────────────
@@ -178,14 +159,16 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [translatedPage, setTranslatedPage] = useState<number | null>(null);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [showHighlightsPanel, setShowHighlightsPanel] = useState(false);
+  // True when the page text came from the device's offline copy.
+  const [offline, setOffline] = useState(false);
   const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
   const [allHighlightsLoading, setAllHighlightsLoading] = useState(false);
   const pendingScrollToHighlight = useRef<string | null>(null);
 
   // Settings — initialised from localStorage immediately to avoid flash
   const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
-  const [theme, setTheme] = useState<Theme>(() => loadSetting('theme', 'light'));
-  const [fontFamily, setFontFamily] = useState<FontFamily>(() => loadSetting('fontFamily', 'georgia'));
+  const [theme, setTheme] = useState<Theme>(() => loadSetting<Theme>('theme', DEFAULT_THEME));
+  const [fontFamily, setFontFamily] = useState<FontFamily>(() => loadSetting<FontFamily>('fontFamily', DEFAULT_FONT));
 
   // Text-to-speech
   const [showTts, setShowTts] = useState(false);
@@ -239,6 +222,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => { saveSettings({ ttsWebVoiceBg }); }, [ttsWebVoiceBg]);
   useEffect(() => { saveSettings({ ttsKokoroVoice }); }, [ttsKokoroVoice]);
   useEffect(() => { saveSettings({ ttsKeepAwake }); }, [ttsKeepAwake]);
+
+  // Theme and font are universal, not per-book: push every change onto <html>
+  // so the library (and the next book opened) picks it up straight away.
+  useEffect(() => { applyTheme(theme, fontFamily); }, [theme, fontFamily]);
 
   // Remember this as the last opened book
   useEffect(() => {
@@ -295,33 +282,51 @@ export default function Reader({ bookId }: { bookId: string }) {
     }
   }, [currentPage, bookId]);
 
-  // Load book + progress
+  // Load book + progress. A book saved for offline reading in the library
+  // supplies its text — and, when Firestore can't be reached at all, its
+  // metadata and last page too — so it opens with no network.
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const [bookData, progress] = await Promise.all([
-        getBook(user.uid, bookId),
-        getProgress(user.uid, bookId),
-      ]);
-      if (!bookData) return;
-      setBook(bookData);
-      if (progress) setCurrentPage(progress.currentPage);
-      const json = await getStorageJson<ExtractedBook>(bookData.textStoragePath);
-      setPages(json.pages);
+      const cached = await getOfflineBook(bookId);
+
+      let bookData: Book | null = null;
+      let progress: ReadingProgress | null = null;
+      try {
+        [bookData, progress] = await Promise.all([
+          getBook(user.uid, bookId),
+          getProgress(user.uid, bookId),
+        ]);
+      } catch {
+        // Offline (or Firestore is unreachable) — fall through to the cache.
+      }
+
+      const meta = bookData ?? cached?.book ?? null;
+      if (!meta) return;
+      setBook(meta);
+      setOffline(cached !== null);
+
+      const page = progress?.currentPage ?? loadLocalProgress(bookId);
+      if (page) setCurrentPage(page);
+
+      const pageData =
+        cached?.pages ?? (await getStorageJson<ExtractedBook>(meta.textStoragePath)).pages;
+      setPages(pageData);
       // Image-only PDFs (scanned, or printed-to-PDF with text drawn as vector
       // outlines) extract no text at all — open the original-PDF view instead
       // of an empty reader.
-      if (bookData.fileType !== 'epub' && json.pages.every((p) => !p.text.trim())) {
+      if (meta.fileType !== 'epub' && pageData.every((p) => !p.text.trim())) {
         setViewMode('pdf');
       }
       setLoading(false);
     })();
   }, [user, bookId]);
 
-  // Load highlights for current page
+  // Load highlights for current page. Highlights live in Firestore only, so an
+  // offline read simply shows none rather than failing the page.
   useEffect(() => {
     if (!user) return;
-    getHighlightsForPage(user.uid, bookId, currentPage).then(setHighlights);
+    getHighlightsForPage(user.uid, bookId, currentPage).catch(() => []).then(setHighlights);
   }, [user, bookId, currentPage]);
 
   // Reset translation state when navigating pages. If the user was listening
@@ -345,7 +350,9 @@ export default function Reader({ bookId }: { bookId: string }) {
     if (!user || !book || loading) return;
     if (progressTimer.current) clearTimeout(progressTimer.current);
     progressTimer.current = setTimeout(() => {
-      saveProgress(user.uid, bookId, currentPage, book.pageCount);
+      saveLocalProgress(bookId, currentPage);
+      // Swallowed when offline — the local mirror above is what reopens the book.
+      saveProgress(user.uid, bookId, currentPage, book.pageCount).catch(() => {});
     }, 2000);
     return () => { if (progressTimer.current) clearTimeout(progressTimer.current); };
   }, [user, bookId, currentPage, book, loading]);
@@ -778,8 +785,15 @@ export default function Reader({ bookId }: { bookId: string }) {
         >
           ← Library
         </Link>
-        <span className="text-sm font-medium truncate max-w-[180px] sm:max-w-xs opacity-80">
-          {book?.title}
+        <span className="flex items-center gap-1.5 min-w-0">
+          {offline && (
+            <span title="Reading the copy saved on this device" aria-label="Saved offline">
+              <OfflineIcon className="opacity-60 shrink-0" />
+            </span>
+          )}
+          <span className="text-sm font-medium truncate max-w-[180px] sm:max-w-xs opacity-80">
+            {book?.title}
+          </span>
         </span>
         <div className="flex items-center gap-2">
           {viewMode === 'reader' && (
