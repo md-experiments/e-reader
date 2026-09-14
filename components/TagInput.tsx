@@ -46,17 +46,17 @@ export default function TagInput({
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="flex flex-wrap gap-1.5 p-2 border border-gray-200 rounded-lg min-h-[42px] focus-within:ring-2 focus-within:ring-amber-300 focus-within:border-transparent">
+      <div className="flex flex-wrap gap-1.5 p-2 border border-lexis-border rounded-lg min-h-[42px] focus-within:ring-2 focus-within:ring-lexis-accent focus-within:border-transparent">
         {value.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded-full"
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-lexis-hover text-lexis-fg text-xs rounded-full"
           >
             {tag}
             <button
               type="button"
               onClick={() => remove(tag)}
-              className="text-gray-400 hover:text-gray-700 leading-none"
+              className="text-lexis-muted hover:text-lexis-fg leading-none"
             >
               ×
             </button>
@@ -72,18 +72,18 @@ export default function TagInput({
             if (e.key === 'Backspace' && !input && value.length) remove(value[value.length - 1]);
           }}
           placeholder={value.length === 0 ? placeholder : ''}
-          className="flex-1 min-w-[80px] text-sm outline-none bg-transparent placeholder-gray-400"
+          className="flex-1 min-w-[80px] text-sm outline-none bg-transparent text-lexis-fg placeholder-lexis-muted"
         />
       </div>
 
       {open && (input ? filtered : suggestions.filter((s) => !value.includes(s))).length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-lexis-panel border border-lexis-border rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto">
           {(input ? filtered : suggestions.filter((s) => !value.includes(s))).map((s) => (
             <button
               key={s}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); add(s); }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg"
+              className="w-full text-left px-3 py-2 text-sm text-lexis-fg hover:bg-lexis-hover first:rounded-t-lg last:rounded-b-lg"
             >
               {s}
             </button>
@@ -92,7 +92,7 @@ export default function TagInput({
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); add(input); }}
-              className="w-full text-left px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 first:rounded-t-lg last:rounded-b-lg border-t border-gray-100"
+              className="w-full text-left px-3 py-2 text-sm text-lexis-accent hover:bg-lexis-accent-bg first:rounded-t-lg last:rounded-b-lg border-t border-lexis-border"
             >
               + Create &ldquo;{input.trim()}&rdquo;
             </button>

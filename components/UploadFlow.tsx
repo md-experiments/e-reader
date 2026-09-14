@@ -127,18 +127,18 @@ export default function UploadFlow() {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         className={`border-2 border-dashed rounded-2xl p-10 text-center transition-colors select-none ${
-          isProcessing ? 'pointer-events-none opacity-60 border-gray-200 bg-gray-50' :
-          dragOver ? 'border-amber-400 bg-amber-50 cursor-copy' :
-          'border-gray-200 hover:border-gray-300 bg-gray-50 cursor-pointer'
+          isProcessing ? 'pointer-events-none opacity-60 border-lexis-border bg-lexis-panel' :
+          dragOver ? 'border-lexis-accent bg-lexis-accent-bg cursor-copy' :
+          'border-lexis-border hover:border-lexis-accent bg-lexis-panel cursor-pointer'
         }`}
       >
         <div className="text-3xl mb-3">{file ? (fileType === 'epub' ? '📖' : '📄') : '📂'}</div>
         {file ? (
-          <p className="text-sm font-medium text-gray-600">{file.name}</p>
+          <p className="text-sm font-medium text-lexis-muted">{file.name}</p>
         ) : (
           <>
-            <p className="text-sm font-medium text-gray-700">Drop a PDF or EPUB here</p>
-            <p className="text-xs text-gray-400 mt-1">or click to browse</p>
+            <p className="text-sm font-medium">Drop a PDF or EPUB here</p>
+            <p className="text-xs text-lexis-muted mt-1">or click to browse</p>
           </>
         )}
         <input ref={inputRef} type="file" accept="application/pdf,application/epub+zip,.epub" className="hidden" onChange={handleFileChange} />
@@ -148,24 +148,24 @@ export default function UploadFlow() {
       {file && !isProcessing && (
         <>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Book title</label>
+            <label className="block text-xs font-medium text-lexis-muted mb-1">Book title</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-transparent"
+              className="w-full px-3 py-2 bg-lexis-bg border border-lexis-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-lexis-accent focus:border-transparent"
               placeholder="Enter book title"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Tags <span className="font-normal text-gray-400">(optional)</span></label>
+            <label className="block text-xs font-medium text-lexis-muted mb-1">Tags <span className="font-normal opacity-70">(optional)</span></label>
             <TagInput value={tags} onChange={setTags} suggestions={existingTags} />
           </div>
 
           <button
             onClick={handleUpload}
-            className="w-full py-3 bg-gray-900 text-white text-sm rounded-xl hover:bg-gray-700 transition-colors font-medium"
+            className="w-full py-3 bg-lexis-fg text-lexis-bg text-sm rounded-xl hover:opacity-80 transition-opacity font-medium"
           >
             Add to library
           </button>
@@ -176,17 +176,17 @@ export default function UploadFlow() {
       {isProcessing && (
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin shrink-0" />
-            <span className="text-sm text-gray-600">
+            <div className="w-4 h-4 rounded-full border-2 border-lexis-accent border-t-transparent animate-spin shrink-0" />
+            <span className="text-sm text-lexis-muted">
               {stage === 'extracting'
                 ? `Extracting text… ${fileType === 'epub' ? 'chapter' : 'page'} ${extractProgress.page} of ${extractProgress.total}`
                 : stage === 'uploading' ? 'Uploading to library…' : 'Saving…'}
             </span>
           </div>
           {stage === 'extracting' && extractProgress.total > 0 && (
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-lexis-track rounded-full overflow-hidden">
               <div
-                className="h-full bg-amber-400 rounded-full transition-all"
+                className="h-full bg-lexis-accent rounded-full transition-all"
                 style={{ width: `${(extractProgress.page / extractProgress.total) * 100}%` }}
               />
             </div>
