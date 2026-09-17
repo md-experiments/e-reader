@@ -15,10 +15,13 @@ import {
   formatBytes,
 } from '@/lib/offline';
 import { applyStoredTheme } from '@/lib/theme';
+import { useOnline } from '@/hooks/useOnline';
 import type { Book, ExtractedBook, ReadingProgress } from '@/types';
 
 /** What the library needs to know about a book held offline. */
 interface OfflineEntry {
+  /** Metadata as of the save — enough to list the book with no connection. */
+  book: Book;
   savedAt: number;
   bytes: number;
 }
@@ -37,44 +40,60 @@ export default function LibraryPage() {
   // Resolved after mount: IndexedDB doesn't exist during SSR, and branching on
   // it while rendering would desync hydration.
   const [offlineReady, setOfflineReady] = useState(false);
+  const online = useOnline();
 
   // Theme and font are whatever was last chosen in any book — re-apply them on
   // mount so a change made in another tab shows up here too. (On a cold load
   // the inline script in the root layout has already done this before paint.)
   useEffect(() => { applyStoredTheme(); }, []);
 
+  // Firestore's persistent cache answers these from IndexedDB when there's no
+  // connection, so the usual path also covers the offline one. It can still
+  // reject (storage blocked, say), and the spinner must come down either way.
   useEffect(() => {
     if (!user) return;
-    Promise.all([getBooks(user.uid), getProgressForBooks(user.uid)]).then(
-      ([fetchedBooks, fetchedProgress]) => {
+    Promise.all([getBooks(user.uid), getProgressForBooks(user.uid)])
+      .then(([fetchedBooks, fetchedProgress]) => {
         setBooks(fetchedBooks.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime()));
         setProgress(fetchedProgress);
-        setLoading(false);
-      },
-    );
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [user]);
 
   useEffect(() => {
     listOfflineBooks().then((saved) => {
       setOfflineReady(offlineSupported());
       setOfflineBooks(
-        Object.fromEntries(saved.map((s) => [s.bookId, { savedAt: s.savedAt, bytes: s.bytes }])),
+        Object.fromEntries(
+          saved.map((s) => [s.bookId, { book: s.book, savedAt: s.savedAt, bytes: s.bytes }]),
+        ),
       );
     });
   }, []);
 
+  // On a device that has never synced, the Firestore cache comes back empty
+  // rather than failing — so fall back to the books whose text was explicitly
+  // saved here. They carry their own metadata, which is all a cover needs.
+  const visibleBooks = useMemo(() => {
+    if (books.length > 0) return books;
+    return Object.values(offlineBooks)
+      .map((entry) => entry.book)
+      .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+  }, [books, offlineBooks]);
+
   const allTags = useMemo(() => {
     const set = new Set<string>();
-    books.forEach((b) => b.tags?.forEach((t) => set.add(t)));
+    visibleBooks.forEach((b) => b.tags?.forEach((t) => set.add(t)));
     return Array.from(set).sort();
-  }, [books]);
+  }, [visibleBooks]);
 
   // Tags sorted by book count descending
   const tagCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    books.forEach((b) => b.tags?.forEach((t) => { counts[t] = (counts[t] ?? 0) + 1; }));
+    visibleBooks.forEach((b) => b.tags?.forEach((t) => { counts[t] = (counts[t] ?? 0) + 1; }));
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [books]);
+  }, [visibleBooks]);
 
   const offlineTotal = useMemo(() => {
     const entries = Object.values(offlineBooks);
@@ -82,8 +101,8 @@ export default function LibraryPage() {
   }, [offlineBooks]);
 
   const filteredBooks = useMemo(
-    () => (activeTag ? books.filter((b) => b.tags?.includes(activeTag)) : books),
-    [books, activeTag],
+    () => (activeTag ? visibleBooks.filter((b) => b.tags?.includes(activeTag)) : visibleBooks),
+    [visibleBooks, activeTag],
   );
 
   const closeSidebarIfMobile = useCallback(() => {
@@ -129,7 +148,7 @@ export default function LibraryPage() {
           const saved = await saveOfflineBook(book, extracted.pages);
           setOfflineBooks((prev) => ({
             ...prev,
-            [book.id]: { savedAt: saved.savedAt, bytes: saved.bytes },
+            [book.id]: { book: saved.book, savedAt: saved.savedAt, bytes: saved.bytes },
           }));
         }
       } catch (err) {
@@ -189,7 +208,7 @@ export default function LibraryPage() {
               }`}
             >
               <span>All books</span>
-              <span className="text-xs tabular-nums opacity-50">{books.length}</span>
+              <span className="text-xs tabular-nums opacity-50">{visibleBooks.length}</span>
             </button>
 
             {tagCounts.length === 0 ? (
@@ -277,6 +296,13 @@ export default function LibraryPage() {
               </Link>
             </div>
 
+            {!online && (
+              <p className="mb-4 text-xs text-lexis-accent bg-lexis-accent-bg px-3 py-2 rounded-lg">
+                You&rsquo;re offline. Books saved to this device open as usual; the rest need a
+                connection, and new uploads will have to wait.
+              </p>
+            )}
+
             {offlineError && (
               <p className="mb-4 text-xs text-red-500 bg-red-500/10 px-3 py-2 rounded-lg flex items-start justify-between gap-3">
                 <span>{offlineError}</span>
@@ -288,7 +314,7 @@ export default function LibraryPage() {
               <div className="flex justify-center py-20">
                 <div className="w-6 h-6 rounded-full border-2 border-lexis-border border-t-transparent animate-spin" />
               </div>
-            ) : filteredBooks.length === 0 && books.length === 0 ? (
+            ) : filteredBooks.length === 0 && visibleBooks.length === 0 ? (
               <div className="text-center py-24">
                 <div className="text-5xl mb-4">📚</div>
                 <p className="text-lexis-muted font-medium">Your library is empty</p>

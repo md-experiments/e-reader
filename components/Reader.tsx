@@ -161,6 +161,8 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [showHighlightsPanel, setShowHighlightsPanel] = useState(false);
   // True when the page text came from the device's offline copy.
   const [offline, setOffline] = useState(false);
+  // Set when the book can't be opened at all — offline, and never saved here.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
   const [allHighlightsLoading, setAllHighlightsLoading] = useState(false);
   const pendingScrollToHighlight = useRef<string | null>(null);
@@ -302,15 +304,33 @@ export default function Reader({ bookId }: { bookId: string }) {
       }
 
       const meta = bookData ?? cached?.book ?? null;
-      if (!meta) return;
+      if (!meta) {
+        setLoadError(
+          navigator.onLine
+            ? "This book couldn't be loaded."
+            : "You're offline and this book hasn't been saved to this device.",
+        );
+        setLoading(false);
+        return;
+      }
       setBook(meta);
       setOffline(cached !== null);
 
       const page = progress?.currentPage ?? loadLocalProgress(bookId);
       if (page) setCurrentPage(page);
 
-      const pageData =
-        cached?.pages ?? (await getStorageJson<ExtractedBook>(meta.textStoragePath)).pages;
+      let pageData: PageData[];
+      try {
+        pageData = cached?.pages ?? (await getStorageJson<ExtractedBook>(meta.textStoragePath)).pages;
+      } catch {
+        setLoadError(
+          navigator.onLine
+            ? "This book's text couldn't be downloaded."
+            : "You're offline and this book's text hasn't been saved to this device.",
+        );
+        setLoading(false);
+        return;
+      }
       setPages(pageData);
       // Image-only PDFs (scanned, or printed-to-PDF with text drawn as vector
       // outlines) extract no text at all — open the original-PDF view instead
@@ -758,6 +778,28 @@ export default function Reader({ bookId }: { bookId: string }) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: t.bg }}>
         <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: t.border }} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center px-6 text-center"
+        style={{ backgroundColor: t.bg, color: t.fg }}
+      >
+        <div className="text-4xl mb-4">📖</div>
+        <p className="text-sm font-medium">{loadError}</p>
+        <p className="text-xs mt-2 max-w-xs opacity-60">
+          Save a book from the library while you have a connection and it stays readable without one.
+        </p>
+        <Link
+          href="/library"
+          className="mt-6 px-5 py-2.5 text-sm rounded-lg border transition-opacity hover:opacity-80"
+          style={{ borderColor: t.border, color: t.fg }}
+        >
+          Back to your library
+        </Link>
       </div>
     );
   }

@@ -1,6 +1,12 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 // Static imports are fine — importing these functions doesn't initialize Firebase.
@@ -32,7 +38,24 @@ export function getFirebaseAuth(): Auth {
 }
 
 export function getFirebaseDb(): Firestore {
-  if (!_db) _db = getFirestore(getApp());
+  if (!_db) {
+    const app = getApp();
+    try {
+      // Persistent cache, not the default in-memory one. The default also
+      // answers offline reads rather than hanging — but it starts empty on
+      // every page load, so an offline launch would show an empty library.
+      // Backed by IndexedDB, the documents (and any writes made offline)
+      // survive a reload, a restart and a week on a plane.
+      // The multi-tab manager keeps two open tabs from fighting over the lease.
+      _db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      });
+    } catch {
+      // Already initialised (dev fast-refresh), or the browser won't give us
+      // storage (private window, blocked cookies). Fall back to memory-only.
+      _db = getFirestore(app);
+    }
+  }
   return _db;
 }
 
