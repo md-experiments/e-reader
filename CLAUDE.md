@@ -21,6 +21,8 @@ lib/
   pdfExtract.ts           PDF text + TOC extraction (pdfjs)
   theme.ts                THEMES/FONTS + settings persistence, shared app-wide
   offline.ts              IndexedDB cache of extracted book text
+app/manifest.ts           Web app manifest (served at /manifest.webmanifest)
+public/sw.js              Service worker — app shell cache. NOT built; edit by hand
 hooks/useAuth.tsx         AuthContext + useAuth()
 types/index.ts            Shared TypeScript interfaces
 proxy.ts                  Next.js 16 middleware (NOT middleware.ts — that name is deprecated)
@@ -60,6 +62,24 @@ const nextConfig: NextConfig = {
   turbopack: {},
 };
 ```
+
+### The service worker is hand-written, not generated
+
+Next's own PWA guide points at Serwist for offline support, and Serwist needs a
+webpack config — which this project can't have. So `public/sw.js` is plain
+JavaScript, shipped as a static file and never bundled: no imports, no
+TypeScript, no build step. Keep it that way.
+
+Three things to know when touching it:
+
+- **Bump `VERSION`** to invalidate every cache on the next activation. Nothing
+  else clears them.
+- **Never cache cross-origin requests.** Firebase Auth/Firestore/Storage and the
+  Hugging Face model download must reach the network; the handler returns early
+  for anything not same-origin, and for `/api/*` and RSC payloads.
+- **Cached responses keep their headers**, which is what lets a cache-served
+  `/reader/*` page stay cross-origin isolated (and Kokoro stay multi-threaded).
+  Don't rebuild a cached `Response` by hand for those routes.
 
 ### Middleware lives in proxy.ts
 
@@ -153,20 +173,49 @@ Settings (fontSize, theme, fontFamily, the TTS preferences) are stored under the
 const [fontSize, setFontSize] = useState<number>(() => loadSetting('fontSize', 18));
 ```
 
-## Offline books
+## Working offline
 
-The library's badge on each cover (`lib/offline.ts`) stores a book's **extracted
-text only** — page text/segments plus the `Book` metadata — in IndexedDB under
-`lexis-offline`. The original PDF/EPUB stays in Storage, so the PDF/EPUB view
-still needs a connection; the reader view doesn't.
+Three separate mechanisms, each covering a different layer. All are needed —
+none of them substitutes for another.
 
-IndexedDB rather than localStorage because a single book's `pages.json` routinely
-runs past localStorage's ~5 MB origin budget.
+| Layer | Mechanism | Where |
+|---|---|---|
+| The app itself (HTML, JS, CSS) | Service worker, cache-first | `public/sw.js` |
+| Books' text | IndexedDB, saved per book from the library | `lib/offline.ts` |
+| Book list, progress, highlights | Firestore's persistent local cache | `lib/firebase.ts` |
+
+**The shell.** `components/ServiceWorkerRegistrar.tsx` registers `public/sw.js`
+after `load`, in production only — a cache-first worker in dev would serve back
+yesterday's bundle. Navigations are cache-first with background revalidation, so
+launching never waits on the network; a deploy is therefore picked up on the
+launch *after* it lands. `/library`, `/`, `/upload` and `/offline` are precached
+on install; other routes (`/reader/<id>`) are cached as they're visited, and an
+uncached route offline gets `app/offline/page.tsx`.
+
+**The books.** The library's badge on each cover (`lib/offline.ts`) stores a
+book's **extracted text only** — page text/segments plus the `Book` metadata —
+in IndexedDB under `lexis-offline`. The original PDF/EPUB stays in Storage, so
+the PDF/EPUB view still needs a connection; the reader view doesn't. IndexedDB
+rather than localStorage because a single book's `pages.json` routinely runs past
+localStorage's ~5 MB origin budget.
 
 `Reader` prefers the cached copy when one exists, and if Firestore is
 unreachable it falls back to the cached `Book` metadata plus the page mirrored
 in `lexis-progress-<bookId>` (written next to the Firestore progress save).
 Deleting a book from the library drops its offline copy too.
+
+**The data.** `getFirebaseDb()` uses `persistentLocalCache` rather than the
+default in-memory one. The default answers offline reads too — it just starts
+empty on every page load, so an offline launch would show an empty library.
+Backed by IndexedDB, documents and offline writes survive a reload.
+
+`hooks/useOnline.ts` wraps `navigator.onLine` for UI that needs to say something
+about connectivity. It reports whether there's *a* network, not whether it
+reaches anything — use it to phrase a message, never to gate a request.
+
+Whatever can't be served offline must fail loudly rather than spin: the library
+catches its load and falls back to the books saved on the device, and the reader
+shows a "not saved to this device" screen instead of an endless spinner.
 
 ## Listening position
 
@@ -240,3 +289,6 @@ the audio engine gets lock-screen controls.
 | Library/upload flashes white before the dark theme appears | `THEME_INIT_SCRIPT` not reaching the document head | Keep the inline `<script>` in `app/layout.tsx` — it must run before the body renders |
 | A new `lexis-*` utility class has no effect | Colour not declared in the `@theme inline` block | Add `--color-lexis-<name>: var(--lexis-<name>)` in `app/globals.css` |
 | Hydration mismatch on a page that reads browser-only state | Branching on `indexedDB`/`localStorage` during render | Resolve it in a `useEffect` (see `offlineReady` in the library page) |
+| Code changes don't show up in the browser | A previous build's shell is being served from the service worker cache | Hard-reload, or bump `VERSION` in `public/sw.js`; the worker is disabled in dev |
+| A Firebase request is served stale or fails oddly | Something cross-origin got cached | The `fetch` handler must return early for non-same-origin URLs |
+| Kokoro TTS drops to one thread | A cached `/reader/*` response lost its COOP/COEP headers | Return the cached `Response` as-is; don't reconstruct it |
