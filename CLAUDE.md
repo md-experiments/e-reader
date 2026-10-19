@@ -14,7 +14,7 @@
 
 ```
 app/                      Next.js App Router pages
-components/               Reusable React components
+components/               Reusable React components (Logo.tsx = brand mark + wordmark)
 lib/
   firebase.ts             Lazy Firebase init — getFirebaseAuth/Db/Storage()
   firestore.ts            All Firestore + Storage helpers
