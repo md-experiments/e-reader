@@ -25,7 +25,7 @@ const sourceSerif = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: 'Lexis — E-Reader',
-  description: 'Your personal Kindle-style PDF reader',
+  description: 'Your personal e-reader: read, highlight and listen to your own books.',
   applicationName: 'Lexis',
   // Installed to a home screen, Lexis should look like an app, not a tab.
   appleWebApp: { capable: true, title: 'Lexis', statusBarStyle: 'black-translucent' },

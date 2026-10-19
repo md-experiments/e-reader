@@ -1,8 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0d1b2e"/>
-  <g transform="translate(256 256) scale(1) translate(-256 -256)">
-  <path d="M96 148 C150 122, 212 122, 256 156 L256 396 C212 362, 150 362, 96 388 Z" fill="#d4af6e"/>
-  <path d="M416 148 C362 122, 300 122, 256 156 L256 396 C300 362, 362 362, 416 388 Z" fill="#e8cd9a"/>
-  <rect x="247" y="150" width="18" height="248" rx="9" fill="#0d1b2e" opacity="0.4"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0d1b2e"/>
+  <path d="M9 19.5C16 15.5 25 15.5 31 20V50C25 45.8 16 45.8 9 49.5Z" fill="#d4af6e"/>
+  <path d="M55 19.5C48 15.5 39 15.5 33 20V50C39 45.8 48 45.8 55 49.5Z" fill="#ecd4a4"/>
+  <g stroke="#0d1b2e" stroke-opacity=".3" stroke-width="1.4" stroke-linecap="round" fill="none">
+    <path d="M13.5 25c4.2-1.5 8.6-1.5 13 .2M13.5 30c4.2-1.5 8.6-1.5 13 .2M13.5 35c4.2-1.5 8.6-1.5 13 .2M13.5 40c2.8-1 5.6-1.2 8.5-.8"/>
+    <path d="M43 24.4c2.6-.4 5-.2 7.5.6M43 29.4c2.6-.4 5-.2 7.5.6M43 34.4c2.6-.4 5-.2 7.5.6"/>
+  </g>
+  <path d="M35.5 18.4V56L37.75 53.6 40 56V17.4C38.4 17.5 36.9 17.8 35.5 18.4Z" fill="#c2533a"/>
 </svg>

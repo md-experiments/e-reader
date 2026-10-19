@@ -22,7 +22,7 @@
  * Bump VERSION to throw away every cache on the next activation.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const PAGES = `lexis-pages-${VERSION}`;
 const ASSETS = `lexis-assets-${VERSION}`;
 const CURRENT = [PAGES, ASSETS];

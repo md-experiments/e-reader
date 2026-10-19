@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AuthGuard from '@/components/AuthGuard';
 import TagInput from '@/components/TagInput';
 import { CheckIcon, DownloadIcon, SpinnerIcon } from '@/components/icons';
+import { Logo } from '@/components/Logo';
 import { useAuth } from '@/hooks/useAuth';
 import { getBooks, getProgressForBooks, updateBook, deleteBook, getStorageJson } from '@/lib/firestore';
 import {
@@ -262,7 +263,9 @@ export default function LibraryPage() {
                 style={{ width: sidebarOpen ? '1.25rem' : '0.875rem' }}
               />
             </button>
-            <h1 className="text-xl font-bold flex-1">Lexis</h1>
+            <h1 className="flex-1">
+              <Logo size={26} />
+            </h1>
             <span className="text-xs text-lexis-muted hidden sm:block">{user?.email}</span>
             <button onClick={signOut} className="text-xs text-lexis-muted hover:text-lexis-fg transition-colors">
               Sign out

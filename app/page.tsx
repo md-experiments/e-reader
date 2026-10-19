@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { LogoMark } from '@/components/Logo';
 
 function getLastRoute(): string {
   try {
@@ -66,8 +67,14 @@ export default function HomePage() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-amber-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-amber-100 p-8">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-serif font-bold text-gray-900 tracking-tight">Lexis</h1>
-          <p className="mt-2 text-sm text-gray-400">Your personal e-reader</p>
+          <LogoMark size={64} className="mx-auto mb-4 drop-shadow-sm" />
+          <h1
+            className="text-4xl font-bold text-gray-900 tracking-tight"
+            style={{ fontFamily: 'var(--font-merriweather), Georgia, serif' }}
+          >
+            Lexis
+          </h1>
+          <p className="mt-2 text-sm text-gray-400">Read, highlight and listen to your own books</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">

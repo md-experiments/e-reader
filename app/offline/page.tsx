@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LogoMark } from '@/components/Logo';
 
 // Served by the service worker when a page is requested that has never been
 // visited and the network is unreachable. Precached on install, so it is always
@@ -9,7 +10,7 @@ export default function OfflinePage() {
       className="min-h-screen bg-lexis-bg text-lexis-fg flex flex-col items-center justify-center px-6 text-center"
       style={{ fontFamily: 'var(--lexis-font)' }}
     >
-      <div className="text-5xl mb-4">📖</div>
+      <LogoMark size={56} className="mb-5" />
       <h1 className="text-lg font-semibold">You&rsquo;re offline</h1>
       <p className="text-sm text-lexis-muted mt-2 max-w-xs">
         This page hasn&rsquo;t been opened on this device yet, so there&rsquo;s no copy to fall back
